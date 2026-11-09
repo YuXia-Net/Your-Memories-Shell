@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\UnknownX.mp3" Condition="'$(IncludePrivateMedia)' == 'true' and Exists('Assets\UnknownX.mp3')" LogicalName="MemoryShell.Media.UnknownX.mp3" />
+    <EmbeddedResource Include="Assets\UnknownX.lrc" Condition="'$(IncludePrivateMedia)' == 'true' and Exists('Assets\UnknownX.lrc')" LogicalName="MemoryShell.Media.UnknownX.lrc" />
+  </ItemGroup>
+</Project>

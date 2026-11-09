@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+.vs/
+Workspace/
+**/Workspace/
+*.log
+*.zip
+*.sqlite
+*.sqlite-*
+*.tmp
+.init-diagnosis/
+.release-check/
+SourceRelease/
+ReleaseReview/
+Release/
+MemoryShell.Media/Assets/*.mp3
+MemoryShell.Media/Assets/*.lrc
