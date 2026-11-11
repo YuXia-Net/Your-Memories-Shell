@@ -66,6 +66,7 @@ public sealed partial class MainWindow
         foreach (var pane in panes.Values)
             pane.ApplyWorkspaceAppearance(appearance, wallpaper);
         memoryTerminal?.ApplyWorkspaceAppearance(appearance, wallpaper, store.Appearance);
+        RefreshSessionActions();
     }
 
     private static void ApplyInterfaceFont(DependencyObject element, FontFamily font)
@@ -134,6 +135,7 @@ public sealed partial class MainWindow
         var presets = new Dictionary<string, WorkspaceAppearance>(appearanceFile.Presets, StringComparer.OrdinalIgnoreCase);
         var skin = CreateSkinPicker(workspaceAppearance.Skin);
         var logoSide = new ToolbarLayoutPicker(workspaceAppearance.LogoOnLeft);
+        var terminalActions = new TerminalActionsPicker(workspaceAppearance);
         var terminalFont = Field(L10n.Get("SE9573BBD1CD8"), L10n.Get("SEFFCFD85CA96"));
         var interfaceFont = Field(L10n.Get("S7E8F3BF3EB30"), L10n.Get("S050F572D02A0"));
         var terminalSize = Number(L10n.Get("S2CA0EEBACFE2"), 9, 32);
@@ -174,7 +176,8 @@ public sealed partial class MainWindow
         preview.Write("\u001b[36muser@your-server\u001b[0m:~$ ssh production\r\n\u001b[32mWelcome to Your Memories Shell\u001b[0m\r\n$ ls -lh\r\n\u001b[34mworkspace/\u001b[0m  notes.txt  backup.tar.gz\r\n$ ");
         WorkspaceAppearance ReadAppearance() => new()
         {
-            Skin = (WorkspaceSkin)skin.SelectedIndex, LogoOnLeft = logoSide.SelectedIndex == 0,
+            Skin = (WorkspaceSkin)skin.SelectedIndex, LogoOnLeft = logoSide.SelectedIndex == 0, TerminalActionsAtTabs = terminalActions.AtTabs,
+            TerminalActionsOnLeft = terminalActions.OnLeft,
             TerminalFont = OptionalText(terminalFont), InterfaceFont = OptionalText(interfaceFont),
             TerminalFontSize = ReadNumber(terminalSize), CommandFontSize = ReadNumber(commandSize),
             Scrollback = ReadNumber(scrollback), CursorBlink = blink.IsChecked == true,
@@ -202,6 +205,8 @@ public sealed partial class MainWindow
             var defaults = settings.ResolveTerminal(store.Appearance);
             skin.SelectedIndex = (int)settings.Skin;
             logoSide.SelectedIndex = settings.LogoOnLeft ? 0 : 1;
+            terminalActions.AtTabs = settings.TerminalActionsAtTabs;
+            terminalActions.OnLeft = settings.TerminalActionsOnLeft;
             terminalFont.Text = settings.TerminalFont ?? "";
             interfaceFont.Text = settings.InterfaceFont ?? "";
             terminalSize.Value = defaults.FontSize;
@@ -288,11 +293,12 @@ public sealed partial class MainWindow
         };
 
         AddTab(L10n.Get("S86A63F23A076"),
-            SettingsPages.Section(L10n.Get("SD77BEEBD1232"), skin, logoSide),
-            SettingsPages.Section(L10n.Get("SF7D013552098"), chooser, Row(loadPreset, deletePreset), presetName, reset));
+            new SettingsColumns(SettingsPages.Section(L10n.Get("SD77BEEBD1232"), skin, logoSide, terminalActions),
+            SettingsPages.Section(L10n.Get("SF7D013552098"), chooser, Row(loadPreset, deletePreset), presetName, reset)));
         var terminalFields = new StackPanel { Spacing = 12, Children =
         {
-            SettingsPages.Section(L10n.Get("S46A8CE191892"), interfaceFont, terminalFont, terminalSize, commandSize, scrollback, blink),
+            SettingsPages.Section(L10n.Get("S46A8CE191892"), interfaceFont, terminalFont,
+                new SettingsColumns(terminalSize, commandSize, 300), scrollback, blink),
             SettingsPages.Section(L10n.Get("S2AE75E168123"), terminalBack, terminalText, cursor, selection, ansi),
             SettingsPages.Section(L10n.Get("S75BDE8E3BBA4"), wallpaperLabel, Row(selectImage, removeImage), opacity, stretch), error
         } };
@@ -370,7 +376,7 @@ public sealed partial class MainWindow
 
         void AddTab(string title, params UIElement[] children)
         {
-            var panel = new StackPanel { Padding = new Thickness(3, 8, 12, 8), Spacing = 20 };
+            var panel = new StackPanel { Spacing = 20 };
             foreach (var child in children)
                 panel.Children.Add(child);
             tabs.Add(title, panel, ApplyAppearanceAsync);

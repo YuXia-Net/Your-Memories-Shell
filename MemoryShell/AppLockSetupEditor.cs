@@ -66,11 +66,18 @@ internal sealed class AppLockSetupEditor : StackPanel
         return null;
     }
 
-    public Task SaveAsync()
+    public Task<AppLockState?> CreateAsync()
     {
         var kind = Kind;
         var value = first?.Value ?? "";
-        return Task.Run(() => AppLockStore.Set(kind, value));
+        return Task.Run(() => AppLockStore.Create(kind, value));
+    }
+
+    public Task SaveAsync(AppLockStore storage)
+    {
+        var kind = Kind;
+        var value = first?.Value ?? "";
+        return storage.SetAsync(kind, value);
     }
 
     public void Clear() { first?.Clear(); second?.Clear(); }

@@ -57,14 +57,16 @@ internal sealed partial class SessionPane : Grid, IDisposable
 
     public string StatusText { get; private set; } = L10n.Get("S8BE0EA36A9BB");
     internal ConnectionProfile Profile => profile;
-    internal bool IsConnected => session is not null;
+    internal bool IsConnected => session is not null && !disconnectRequested && !disposed;
+    internal bool IsTransferring => transferCancellation is not null && !disposed;
+    internal event Action? ActivityChanged;
     internal string DisplayStatus => MainWindow.MaskDeviceAddress(profile, StatusText, store.HideDeviceAddress);
     public string MetricsText { get; private set; } = L10n.Get("S336B6DE50359");
     public LinuxMetrics? MetricsSnapshot { get; private set; }
 
     public SessionPane(nint hwnd, ConnectionProfile profile, WorkspaceStore store, Action saveWorkspace,
         Func<HostKeyIdentity, CancellationToken, Task<bool>> trustHost, Action<string> statusChanged,
-        Action<string> metricsChanged, Action<bool> connectionCompleted, Func<Task> reconnect, Func<Task> editConnection, Action fullScreen)
+        Action<string> metricsChanged, Action<bool> connectionCompleted, Func<Task> reconnect, Func<Task> editConnection)
     {
         this.hwnd = hwnd;
         this.profile = profile;
@@ -77,29 +79,26 @@ internal sealed partial class SessionPane : Grid, IDisposable
         history.AddRange(store.CommandHistory.Where(item => item.ProfileId == profile.Id).TakeLast(200).Select(item => item.Text));
         historyIndex = history.Count;
         cancellation = lifetime.Token;
+        FlowDirection = FlowDirection.LeftToRight;
+        Padding = new Thickness(10, 8, 10, 8);
 
-        RowDefinitions.Add(new RowDefinition { Height = new GridLength(2.3, GridUnitType.Star), MinHeight = 90 });
+        RowDefinitions.Add(new RowDefinition { Height = new GridLength(2.3, GridUnitType.Star), MinHeight = 130 });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(7) });
-        RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 190 });
+        RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 240 });
         splitter = BuildPaneSplitter();
         SetRow(splitter, 2);
         Children.Add(splitter);
-        Children.Add(new Border
-        {
-            BorderThickness = new Thickness(1, 0, 1, 1),
-            BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"),
-            Child = terminal
-        });
-
         if (store.Appearance is { } appearance)
             terminal.SetAppearance(appearance);
-        var commandFrame = BuildCommandBar(reconnect, editConnection, fullScreen);
+        var commandFrame = BuildCommandBar(reconnect, editConnection);
         SetRow(commandFrame, 1);
         Children.Add(commandFrame);
+        Children.Add(new Border { BorderThickness = new Thickness(1, 1, 1, 0), CornerRadius = new CornerRadius(8, 8, 0, 0), BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"), Child = terminal });
 
         lower = new TabView { IsAddTabButtonVisible = false, TabWidthMode = TabViewWidthMode.SizeToContent, Background = WorkspaceTheme.Brush("ShellPaneBrush") };
         var lowerHeaders = new[] { "S39932F24FE11", "QuickCommands", "SB52D10315237", "SA2F59F64D262" };
+        var lowerIcons = new[] { "\uE8B7", "\uE756", "\uE968", "\uE8AB" };
         for (var index = 0; index < lowerHeaders.Length; index++)
         {
             var host = new ContentControl
@@ -114,15 +113,18 @@ internal sealed partial class SessionPane : Grid, IDisposable
             lowerContentHosts[index] = host;
             lower.TabItems.Add(new TabViewItem
             {
-                IsClosable = false, Header = L10n.Get(lowerHeaders[index]), Content = host
+                IsClosable = false, Header = L10n.Get(lowerHeaders[index]), Content = host,
+                IconSource = new FontIconSource { Glyph = lowerIcons[index], FontSize = 14 }
             });
         }
         lower.SelectedIndex = 0;
         lower.SelectionChanged += (_, _) => { QueueLowerPaneUpdate(); SavePanelLayout(); };
         Loaded += (_, _) => QueueLowerPaneUpdate();
         Unloaded += (_, _) => { directoryTimer?.Stop(); fileFilterTimer?.Stop(); };
-        SetRow(lower, 3);
-        Children.Add(lower);
+        lowerFrame = new Border { Child = lower, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
+            BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"), Background = WorkspaceTheme.Brush("ShellPaneBrush") };
+        SetRow(lowerFrame, 3);
+        Children.Add(lowerFrame);
 
         command.KeyDown += Command_KeyDown;
         path.KeyDown += async (_, e) =>
@@ -189,7 +191,7 @@ internal sealed partial class SessionPane : Grid, IDisposable
 
     private UIElement BuildFilePane()
     {
-        var panel = new Grid { Padding = new Thickness(6, 5, 6, 4), RowSpacing = 4 };
+        var panel = new Grid { Padding = new Thickness(10, 8, 10, 6), RowSpacing = 6 };
         var browser = new Grid();
         var fullTemplate = (DataTemplate)Application.Current.Resources["RemoteFileRowExplorerTemplate"];
         var compactTemplate = (DataTemplate)Application.Current.Resources["RemoteFileRowCompactTemplate"];
@@ -1052,6 +1054,8 @@ internal sealed partial class SessionPane : Grid, IDisposable
         lifetime.Cancel();
         if (session is { } connected) _ = CloseTransportAsync(connected);
         session = null;
+        ActivityChanged?.Invoke();
+        ActivityChanged = null;
         terminal.Dispose();
         lifetime.Dispose();
     }

@@ -14,37 +14,30 @@ internal sealed class VaultDatabase : IDisposable
     private const int NonceLength = 12;
     private const int TagLength = 16;
     private const int MaximumPayloadLength = 64 * 1024 * 1024;
-    private const int RandomOnlyVersion = 1;
-
-    // The first two values match device-key files written by earlier releases.
-    private enum DeviceKeyMode : byte { Enrollable, Master, RandomOnly }
+    private const int StorageVersion = 2;
 
     private readonly object gate = new();
     private readonly SqliteConnection connection;
     private byte[] salt;
     private byte[] key;
+    private byte[] lastNonce;
     private bool disposed;
-    private DeviceKeyMode mode;
 
     private sealed record Envelope(byte[] Salt, byte[] Nonce, byte[] Ciphertext, byte[] Tag);
 
-    private VaultDatabase(string path, SqliteConnection connection, byte[] salt, byte[] key, DeviceKeyMode mode)
+    private VaultDatabase(string path, SqliteConnection connection, byte[] salt, byte[] key)
     {
         FilePath = path;
         this.connection = connection;
         this.salt = salt;
         this.key = key;
-        this.mode = mode;
+        lastNonce = ReadEnvelope(connection).Nonce;
     }
 
     public string FilePath { get; }
-    public bool HasMaster { get { lock (gate) return mode == DeviceKeyMode.Master; } }
-    public bool IsRandomOnly { get { lock (gate) return mode == DeviceKeyMode.RandomOnly; } }
-
-    public static VaultDatabase Create(string path, string? passphrase, byte[] plaintext, bool randomOnly = false)
+    public static VaultDatabase Create(string path, string passphrase, byte[] plaintext)
     {
-        if (randomOnly && passphrase is not null) throw new ArgumentException(L10n.Get("S2DA2D989385F"));
-        if (passphrase is not null) ValidateNewPassphrase(passphrase);
+        ValidateNewPassphrase(passphrase);
         ValidatePayload(plaintext);
 
         var destination = Path.GetFullPath(path);
@@ -58,8 +51,7 @@ internal sealed class VaultDatabase : IDisposable
         SqliteConnection? active = null;
         try
         {
-            var mode = randomOnly ? DeviceKeyMode.RandomOnly : passphrase is null ? DeviceKeyMode.Enrollable : DeviceKeyMode.Master;
-            key = passphrase is null ? CreateRandomKey() : DeriveKey(passphrase, salt);
+            key = DeriveKey(passphrase, salt);
             using (var database = Connect(temporary))
             {
                 ConfigureWrites(database);
@@ -69,7 +61,8 @@ internal sealed class VaultDatabase : IDisposable
                 schema.Transaction = transaction;
                 schema.CommandText = $"""
                     PRAGMA application_id = {ApplicationId};
-                    PRAGMA user_version = {(randomOnly ? RandomOnlyVersion : 0)};
+                    PRAGMA user_version = {StorageVersion};
+                    CREATE TABLE local_access (id INTEGER PRIMARY KEY CHECK(id = 1), wrapped_key BLOB NOT NULL) STRICT;
                     CREATE TABLE vault (
                         id INTEGER PRIMARY KEY CHECK(id = 1),
                         format INTEGER NOT NULL CHECK(format = {FormatVersion}),
@@ -93,14 +86,14 @@ internal sealed class VaultDatabase : IDisposable
                 insert.Parameters.AddWithValue("$iterations", KdfIterations);
                 BindPayload(insert, payload);
                 insert.ExecuteNonQuery();
+                WriteLocalKey(database, transaction, salt, key);
                 transaction.Commit();
             }
 
-            WriteDeviceKey(destination, salt, key, mode);
             File.Move(temporary, destination, overwrite: false);
             active = Connect(destination);
             ConfigureWrites(active);
-            return new VaultDatabase(destination, active, salt, key, mode);
+            return new VaultDatabase(destination, active, salt, key);
         }
         catch
         {
@@ -131,39 +124,42 @@ internal sealed class VaultDatabase : IDisposable
 
             using var version = database.CreateCommand();
             version.CommandText = "PRAGMA main.user_version;";
-            var databaseMode = Convert.ToInt64(version.ExecuteScalar());
-            if (databaseMode is not (0 or RandomOnlyVersion))
-                throw new InvalidDataException(L10n.Get("SA69CC39AEC8C"));
-            var randomOnly = databaseMode == RandomOnlyVersion;
-            if (randomOnly && passphrase is not null)
-                throw new InvalidOperationException(L10n.Get("SB16E0FC8C436"));
+            var storageVersion = Convert.ToInt64(version.ExecuteScalar());
+            if (storageVersion is not (0 or StorageVersion))
+                throw new InvalidDataException(L10n.Get("UnsupportedVaultFormat"));
 
             var payload = ReadEnvelope(database);
-            var mode = DeviceKeyMode.Master;
-            if (passphrase is null)
+            key = passphrase is null ? ReadLocalKey(database, destination, payload.Salt, storageVersion) : DeriveKey(passphrase, payload.Salt);
+            if (key is null)
             {
-                var wrapped = ReadDeviceKey(destination, payload.Salt);
-                if (wrapped is null)
-                {
-                    if (randomOnly)
-                        throw new CryptographicException(L10n.Get("S98E99E83A14D"));
-                    database.Dispose();
-                    return null;
-                }
-                (key, mode) = wrapped.Value;
-                if ((mode == DeviceKeyMode.RandomOnly) != randomOnly)
-                    throw new CryptographicException(L10n.Get("S40CED8667EA6"));
+                database.Dispose();
+                return null;
             }
-            else
+            try
             {
-                key = DeriveKey(passphrase, payload.Salt);
+                var plaintext = Decrypt(payload, key);
+                CryptographicOperations.ZeroMemory(plaintext);
             }
-            var plaintext = Decrypt(payload, key);
-            CryptographicOperations.ZeroMemory(plaintext);
+            catch (CryptographicException) when (passphrase is null)
+            {
+                CryptographicOperations.ZeroMemory(key);
+                database.Dispose();
+                return null;
+            }
             ConfigureWrites(database);
-            if (remember)
-                WriteDeviceKey(destination, payload.Salt, key, mode);
-            return new VaultDatabase(destination, database, payload.Salt, key, mode);
+            if (remember || storageVersion == 0)
+            {
+                using var transaction = database.BeginTransaction();
+                using var schema = database.CreateCommand();
+                schema.Transaction = transaction;
+                schema.CommandText = $"CREATE TABLE IF NOT EXISTS local_access (id INTEGER PRIMARY KEY CHECK(id = 1), wrapped_key BLOB NOT NULL) STRICT; PRAGMA user_version = {StorageVersion};";
+                schema.ExecuteNonQuery();
+                if (remember || passphrase is null)
+                    WriteLocalKey(database, transaction, payload.Salt, key);
+                transaction.Commit();
+                if (remember || passphrase is null) DeleteTemporaryFile(LegacyKeyPath(destination, payload.Salt));
+            }
+            return new VaultDatabase(destination, database, payload.Salt, key);
         }
         catch
         {
@@ -198,7 +194,6 @@ internal sealed class VaultDatabase : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            RequireMasterMode();
             VerifyCurrentPassphrase(passphrase);
         }
     }
@@ -212,60 +207,26 @@ internal sealed class VaultDatabase : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            RequireMasterMode();
             VerifyCurrentPassphrase(currentPassphrase);
-            RotateKey(newPassphrase, DeviceKeyMode.Master);
+            RotateKey(newPassphrase);
         }
     }
 
-    public void EnrollMaster(string passphrase)
-    {
-        ValidateNewPassphrase(passphrase);
-        lock (gate)
-        {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            if (mode == DeviceKeyMode.RandomOnly)
-                throw new InvalidOperationException(L10n.Get("S127EFE9F2EFB"));
-            if (mode == DeviceKeyMode.Master)
-                throw new InvalidOperationException(L10n.Get("S25CDEBF9A52A"));
-            RotateKey(passphrase, DeviceKeyMode.Master);
-        }
-    }
-
-    public void SwitchToRandomOnly(string? currentPassphrase)
-    {
-        lock (gate)
-        {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            if (mode == DeviceKeyMode.RandomOnly)
-                throw new InvalidOperationException(L10n.Get("SC546F30C07A8"));
-            if (mode == DeviceKeyMode.Master)
-                VerifyCurrentPassphrase(currentPassphrase ?? "");
-            RotateKey(null, DeviceKeyMode.RandomOnly);
-        }
-    }
-
-    private void RotateKey(string? passphrase, DeviceKeyMode replacementMode)
+    private void RotateKey(string passphrase)
     {
         var plaintext = Decrypt(ReadCurrentEnvelope(), key);
         byte[]? replacementKey = null;
         try
         {
             var replacementSalt = RandomNumberGenerator.GetBytes(SaltLength);
-            replacementKey = passphrase is null ? CreateRandomKey() : DeriveKey(passphrase, replacementSalt);
-            // Keep the old key wrapper until the transaction commits.
-            WriteDeviceKey(FilePath, replacementSalt, replacementKey, replacementMode);
-            ReplacePayload(Encrypt(plaintext, replacementSalt, replacementKey),
-                markRandomOnly: replacementMode == DeviceKeyMode.RandomOnly);
+            replacementKey = DeriveKey(passphrase, replacementSalt);
+            ReplacePayload(Encrypt(plaintext, replacementSalt, replacementKey), replacementKey);
 
             var oldKey = key;
-            var oldSalt = salt;
             key = replacementKey;
             salt = replacementSalt;
-            mode = replacementMode;
             replacementKey = null;
             CryptographicOperations.ZeroMemory(oldKey);
-            DeleteTemporaryFile(DeviceKeyPath(FilePath, oldSalt));
         }
         finally
         {
@@ -290,16 +251,11 @@ internal sealed class VaultDatabase : IDisposable
                 using (var snapshot = Connect(temporary)) connection.BackupDatabase(snapshot);
                 File.Move(temporary, destination, false);
                 installed = true;
-                WriteDeviceKey(destination, salt, key, mode);
                 return OpenForCurrentUser(destination) ?? throw new CryptographicException(L10n.Get("SE424F2C2A179"));
             }
             catch
             {
-                if (installed)
-                {
-                    DeleteTemporaryFile(destination);
-                    DeleteTemporaryFile(DeviceKeyPath(destination, salt));
-                }
+                if (installed) DeleteTemporaryFile(destination);
                 throw;
             }
             finally { DeleteTemporaryFile(temporary); }
@@ -311,19 +267,54 @@ internal sealed class VaultDatabase : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            RequireMasterMode();
             var temporary = CreateTemporaryFile(FilePath);
             try
             {
                 using (var snapshot = Connect(temporary))
+                {
                     connection.BackupDatabase(snapshot);
+                    ConfigureWrites(snapshot);
+                    Execute(snapshot, "DELETE FROM local_access; VACUUM;");
+                }
                 return File.ReadAllBytes(temporary);
             }
             finally { DeleteTemporaryFile(temporary); }
         }
     }
 
-    private void ReplacePayload(Envelope payload, bool markRandomOnly = false)
+    internal static T InstallSnapshot<T>(string stagedPath, string destination, Func<T> open)
+    {
+        var recovery = Path.Combine(Path.GetDirectoryName(destination)!, $"workspace-before-restore-{Guid.NewGuid():N}.sqlite");
+        var installed = false;
+        try
+        {
+            if (File.Exists(destination)) File.Replace(stagedPath, destination, recovery);
+            else File.Move(stagedPath, destination);
+            installed = true;
+            return open();
+        }
+        catch (Exception failure)
+        {
+            if (installed)
+            {
+                try
+                {
+                    if (File.Exists(recovery)) File.Replace(recovery, destination, stagedPath);
+                    else File.Move(destination, stagedPath);
+                }
+                catch (Exception rollbackFailure)
+                {
+                    throw new RestoreRollbackException(recovery, failure, rollbackFailure);
+                }
+            }
+            throw;
+        }
+    }
+
+    internal sealed class RestoreRollbackException(string recovery, Exception failure, Exception rollbackFailure)
+        : IOException(L10n.Format("RestoreRollbackFailed", recovery), new AggregateException(failure, rollbackFailure));
+
+    private void ReplacePayload(Envelope payload, byte[]? replacementKey = null)
     {
         using var transaction = connection.BeginTransaction();
         using var update = connection.CreateCommand();
@@ -331,22 +322,19 @@ internal sealed class VaultDatabase : IDisposable
         update.CommandText = """
             UPDATE vault SET format = $format, iterations = $iterations, salt = $salt,
                 nonce = $nonce, ciphertext = $ciphertext, tag = $tag
-            WHERE id = 1 AND salt = $currentSalt AND format = $format AND iterations = $iterations;
+            WHERE id = 1 AND salt = $currentSalt AND nonce = $currentNonce AND format = $format AND iterations = $iterations;
             """;
         update.Parameters.AddWithValue("$format", FormatVersion);
         update.Parameters.AddWithValue("$iterations", KdfIterations);
         update.Parameters.Add("$currentSalt", SqliteType.Blob).Value = salt;
+        update.Parameters.Add("$currentNonce", SqliteType.Blob).Value = lastNonce;
         BindPayload(update, payload);
         if (update.ExecuteNonQuery() != 1)
             throw new InvalidDataException(L10n.Get("S9D87C73CF1E5"));
-        if (markRandomOnly)
-        {
-            using var version = connection.CreateCommand();
-            version.Transaction = transaction;
-            version.CommandText = $"PRAGMA main.user_version = {RandomOnlyVersion};";
-            version.ExecuteNonQuery();
-        }
+        if (replacementKey is not null)
+            WriteLocalKey(connection, transaction, payload.Salt, replacementKey);
         transaction.Commit();
+        lastNonce = payload.Nonce;
     }
 
     private Envelope ReadCurrentEnvelope()
@@ -426,54 +414,50 @@ internal sealed class VaultDatabase : IDisposable
         return associated;
     }
 
-    private static string DeviceKeyPath(string path, byte[] salt) =>
+    private static string LegacyKeyPath(string path, byte[] salt) =>
         path + "." + Convert.ToHexString(salt) + ".device-key";
 
-    private static void WriteDeviceKey(string path, byte[] salt, byte[] key, DeviceKeyMode mode)
+    private static void WriteLocalKey(SqliteConnection database, SqliteTransaction transaction, byte[] salt, byte[] key)
     {
-        var data = new byte[KeyLength + 1];
-        data[0] = (byte)mode;
-        key.CopyTo(data, 1);
-        var target = DeviceKeyPath(path, salt);
-        var temporary = CreateTemporaryFile(path);
-        try
-        {
-            var wrapped = ProtectedData.Protect(data, salt, DataProtectionScope.CurrentUser);
-            using (var output = new FileStream(temporary, FileMode.Truncate, FileAccess.Write, FileShare.None))
-            {
-                output.Write(wrapped);
-                output.Flush(flushToDisk: true);
-            }
-            File.Move(temporary, target, overwrite: true);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(data);
-            DeleteTemporaryFile(temporary);
-        }
+        var wrapped = ProtectedData.Protect(key, salt, DataProtectionScope.CurrentUser);
+        using var command = database.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT OR REPLACE INTO local_access(id, wrapped_key) VALUES(1, $key);";
+        command.Parameters.Add("$key", SqliteType.Blob).Value = wrapped;
+        command.ExecuteNonQuery();
     }
 
-    private static (byte[] Key, DeviceKeyMode Mode)? ReadDeviceKey(string path, byte[] salt)
+    private static byte[]? ReadLocalKey(SqliteConnection database, string path, byte[] salt, long storageVersion)
     {
-        var target = DeviceKeyPath(path, salt);
-        if (!File.Exists(target))
-            return null;
         byte[]? data = null;
         try
         {
-            using var input = File.OpenRead(target);
-            if (input.Length is <= 0 or > 16384)
-                return null;
-            var wrapped = new byte[(int)input.Length];
-            input.ReadExactly(wrapped);
+            byte[] wrapped;
+            if (storageVersion == 0)
+            {
+                var target = LegacyKeyPath(path, salt);
+                if (!File.Exists(target)) return null;
+                using var input = File.OpenRead(target);
+                if (input.Length is <= 0 or > 16384) return null;
+                wrapped = new byte[(int)input.Length];
+                input.ReadExactly(wrapped);
+            }
+            else
+            {
+                using var command = database.CreateCommand();
+                command.CommandText = "SELECT wrapped_key FROM local_access WHERE id = 1 AND typeof(wrapped_key) = 'blob' AND length(wrapped_key) BETWEEN 1 AND 16384;";
+                if (command.ExecuteScalar() is not byte[] bytes) return null;
+                wrapped = bytes;
+            }
             data = ProtectedData.Unprotect(wrapped, salt, DataProtectionScope.CurrentUser);
-            if (data.Length != KeyLength + 1 || data[0] > (byte)DeviceKeyMode.RandomOnly)
-                return null;
+            var offset = storageVersion == 0 ? 1 : 0;
+            if (data.Length != KeyLength + offset || (offset == 1 && data[0] != 1)) return null;
             var recovered = GC.AllocateUninitializedArray<byte>(KeyLength, pinned: true);
-            data.AsSpan(1).CopyTo(recovered);
-            return (recovered, (DeviceKeyMode)data[0]);
+            data.AsSpan(offset).CopyTo(recovered);
+            return recovered;
         }
         catch (CryptographicException) { return null; }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 1) { return null; }
         finally
         {
             if (data is not null) CryptographicOperations.ZeroMemory(data);
@@ -490,21 +474,6 @@ internal sealed class VaultDatabase : IDisposable
     {
         if (string.IsNullOrEmpty(passphrase))
             throw new ArgumentException(L10n.Get("SA956538FB4EE"), nameof(passphrase));
-    }
-
-    private static byte[] CreateRandomKey()
-    {
-        var result = GC.AllocateUninitializedArray<byte>(KeyLength, pinned: true);
-        RandomNumberGenerator.Fill(result);
-        return result;
-    }
-
-    private void RequireMasterMode()
-    {
-        if (mode == DeviceKeyMode.RandomOnly)
-            throw new InvalidOperationException(L10n.Get("S706C7F448B75"));
-        if (mode != DeviceKeyMode.Master)
-            throw new InvalidOperationException(L10n.Get("SE6E373E695A0"));
     }
 
     private void VerifyCurrentPassphrase(string passphrase)

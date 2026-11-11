@@ -8,11 +8,9 @@ namespace MemoryShell;
 
 internal static class AppLockDialog
 {
-    public static bool IsEnabled => AppLockStore.Load() is not null;
-
-    public static async Task<bool> RequireAsync(XamlRoot root)
+    public static async Task<bool> RequireAsync(XamlRoot root, AppLockStore storage)
     {
-        if (AppLockStore.Load() is not { } state)
+        if (storage.Load() is not { } state)
             return true;
 
         var length = state.CredentialLength;
@@ -50,9 +48,10 @@ internal static class AppLockDialog
             var submitted = revision;
             verifying = true;
             retryAfter = 0;
+            var deferred = false;
             try
             {
-                var result = await Task.Run(() => AppLockStore.Verify(value));
+                var result = await storage.VerifyAsync(value);
                 if (!active)
                     return;
                 if (result.Accepted && input.CanSubmit && input.Value == value)
@@ -63,6 +62,7 @@ internal static class AppLockDialog
                 else
                 {
                     retryAfter = result.RetryAfter;
+                    deferred = result.Deferred;
                 }
             }
             catch (Exception)
@@ -73,7 +73,7 @@ internal static class AppLockDialog
             finally
             {
                 verifying = false;
-                if (revision != submitted || retryAfter > 0)
+                if (revision != submitted || deferred)
                     Schedule();
             }
         }
@@ -106,12 +106,12 @@ internal static class AppLockDialog
         }
     }
 
-    public static async Task ShowSettingsAsync(XamlRoot root)
+    public static async Task ShowSettingsAsync(XamlRoot root, AppLockStore storage)
     {
-        if (!await RequireAsync(root))
+        if (!await RequireAsync(root, storage))
             return;
 
-        var state = AppLockStore.Load();
+        var state = storage.Load();
         var editor = new AppLockSetupEditor(state?.Kind);
         if (state is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(state.Hash);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = WorkspaceTheme.Brush("ShellErrorBrush") };
@@ -129,7 +129,7 @@ internal static class AppLockDialog
             if (editor.ValidationError() is { } message) { args.Cancel = true; error.Text = message; return; }
             var deferral = args.GetDeferral();
             dialog.IsEnabled = false;
-            try { await editor.SaveAsync(); }
+            try { await editor.SaveAsync(storage); }
             catch (Exception ex) { args.Cancel = true; error.Text = ex.Message; }
             finally { dialog.IsEnabled = true; deferral.Complete(); }
         };

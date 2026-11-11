@@ -14,6 +14,7 @@ public sealed partial class MainWindow
 
     private async Task OpenSessionAsync(ConnectionProfile profile, string? secret, byte[]? privateKey)
     {
+        NavigateWorkspace(WorkspacePage.Sessions);
         var state = new ConnectionTab(profile, secret, privateKey);
         if (privateKey is not null)
             CryptographicOperations.ZeroMemory(privateKey);
@@ -118,8 +119,7 @@ public sealed partial class MainWindow
                 if (ReferenceEquals(Sessions.SelectedItem, tab))
                     RefreshMonitor();
             },
-                () => OfferRetryAsync(tab, state, automatic: false), () => EditSessionSettingsAsync(tab, state),
-                ToggleWindowFullScreen);
+                () => OfferRetryAsync(tab, state, automatic: false), () => EditSessionSettingsAsync(tab, state));
             pane.ApplyPanelLayout(panelLayout, layout =>
             {
                 workspaceLayout = workspaceLayout with
@@ -132,7 +132,9 @@ public sealed partial class MainWindow
             pane.ApplyFilePreferences(FilePreferences);
             pane.ApplyWorkspaceAppearance(workspaceAppearance, workspaceWallpaper);
             panes.Add(tab, pane);
+            pane.ActivityChanged += RefreshSessionIndicators;
             state.ContentHost.Content = pane;
+            RefreshSessionActions();
             UpdateVisibleMonitor();
             var failure = await pane.ConnectAsync(state.Secret, state.PrivateKey?.ToArray());
             if (ReferenceEquals(configuration, state.Profile))
@@ -188,7 +190,7 @@ public sealed partial class MainWindow
 
     private void ToggleWindowFullScreen_Click(object sender, RoutedEventArgs e)
     {
-        try { ToggleWindowFullScreen(); }
+        try { if (workspacePage == WorkspacePage.Probe) ToggleProbeFullScreen(); else ToggleWindowFullScreen(); }
         catch (Exception ex) { Status.Text = ex.Message; }
     }
 

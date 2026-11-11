@@ -17,6 +17,9 @@ internal sealed partial class SessionPane
     private long transferDisplayVersion;
     private long progressStarted;
     private long progressOrigin = -1;
+    internal double? TransferPercentage { get; private set; }
+    private long transferCompletedAt;
+    internal long TransferCompletedAt => transferCompletedAt != 0 && Stopwatch.GetElapsedTime(transferCompletedAt).TotalMilliseconds < 1200 ? transferCompletedAt : 0;
 
     private UIElement BuildTransferCard()
     {
@@ -45,7 +48,7 @@ internal sealed partial class SessionPane
         transferCard = new Border
         {
             Child = layout, Visibility = Visibility.Collapsed, Padding = new Thickness(10, 8, 10, 8),
-            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(2),
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
             BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"), Background = WorkspaceTheme.Brush("ShellCardBrush")
         };
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
@@ -57,6 +60,9 @@ internal sealed partial class SessionPane
 
     private void BeginTransferDisplay()
     {
+        TransferPercentage = null;
+        transferCompletedAt = 0;
+        ActivityChanged?.Invoke();
         transferItemNames.Clear();
         transferItemCount = 0;
         currentTransferText.Text = L10n.Get("SAF20B81BD1FD");
@@ -82,6 +88,8 @@ internal sealed partial class SessionPane
         transferTitle.Text = $"{action} · {name}";
         transferBar.Value = 0;
         transferBar.IsIndeterminate = total is null;
+        TransferPercentage = total is null ? null : 0;
+        ActivityChanged?.Invoke();
         transferDetail.Text = total is long length ? FormatSize(length) : L10n.Get("SCB25C9CBE9E8");
         return ++transferDisplayVersion;
     }
@@ -100,6 +108,7 @@ internal sealed partial class SessionPane
         {
             var percentage = length == 0 ? 100 : Math.Clamp(bytes * 100d / length, 0, 100);
             transferBar.Value = percentage;
+            TransferPercentage = percentage;
             var rate = elapsed > 0 ? Math.Max(0, bytes - progressOrigin) / elapsed : 0;
             var remaining = rate > 0 && elapsed >= 2 ? Math.Max(0, length - bytes) / rate : double.NaN;
             var eta = double.IsFinite(remaining) && remaining <= 86400 ? L10n.Format("S4BA0F7344EAE", TimeSpan.FromSeconds(remaining)) : "";
@@ -110,11 +119,14 @@ internal sealed partial class SessionPane
             transferDetail.Text = $"{FormatSize(bytes)}{count}{speed}";
         }
         currentTransferText.Text = transferTitle.Text + "  " + transferDetail.Text;
+        ActivityChanged?.Invoke();
     }
 
     private void FinishTransferDisplay(bool complete, string title)
     {
         transferDisplayVersion++;
+        transferCompletedAt = complete ? Stopwatch.GetTimestamp() : 0;
+        TransferPercentage = complete ? 100 : null;
         if (disposed || transferCard is null)
             return;
         cancelTransfer.IsEnabled = true;

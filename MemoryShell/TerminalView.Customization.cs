@@ -7,6 +7,7 @@ namespace MemoryShell;
 
 public sealed partial class TerminalView
 {
+    internal Brush SurfaceBrush => viewport.Background;
     internal void ApplyWorkspaceAppearance(WorkspaceAppearance settings, BitmapImage? wallpaper, TerminalAppearance? previous)
     {
         workspaceVisuals = settings;
@@ -35,8 +36,11 @@ internal sealed partial class SessionPane
 {
     internal void ApplyWorkspaceAppearance(WorkspaceAppearance settings, BitmapImage? wallpaper)
     {
+        SetActionsAtTabs(settings.TerminalActionsAtTabs);
         command.FontFamily = new FontFamily(settings.TerminalFont ?? "Consolas");
         command.FontSize = settings.CommandFontSize ?? 13;
         terminal.ApplyWorkspaceAppearance(settings, wallpaper, store.Appearance);
+        tabActionsFrame.Background = terminal.SurfaceBrush;
+        TabActionsHost.HorizontalAlignment = HorizontalAlignment.Right;
     }
 }

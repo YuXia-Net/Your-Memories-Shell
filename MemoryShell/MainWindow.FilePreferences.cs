@@ -25,8 +25,7 @@ public sealed partial class MainWindow
     private void SaveInitialFileStyle(bool explorer)
     {
         var next = FilePreferences with { ExplorerStyle = explorer };
-        Directory.CreateDirectory(WorkspaceStore.CustomFolder);
-        File.WriteAllText(FilePreferencesPath, JsonSerializer.Serialize(next, FilePreferencesJson));
+        WorkspaceFile.WriteJson(FilePreferencesPath, next, FilePreferencesJson);
         filePanelPreferences = next;
     }
     private static string FilePreferencesPath => Path.Combine(WorkspaceStore.CustomFolder, "FilePanel.json");
@@ -86,8 +85,8 @@ public sealed partial class MainWindow
             catch (Exception ex) { error.Text = ex.Message; }
         };
         var panel = new StackPanel { Spacing = 20, MinWidth = 285, Children = {
-            SettingsPages.Section(L10n.Get("FileStyle"), style, columns, height),
-            SettingsPages.Section(L10n.Get("S473BEEA442E4"), sort, order, foldersFirst),
+            new SettingsColumns(SettingsPages.Section(L10n.Get("FileStyle"), style, columns, height),
+            SettingsPages.Section(L10n.Get("S473BEEA442E4"), sort, order, foldersFirst)),
             SettingsPages.Section(L10n.Get("SA860597F3906"), folder, choose, error) } };
         tabs.Add(L10n.Get("S4E25377BA960"), panel, () =>
         {
@@ -101,14 +100,7 @@ public sealed partial class MainWindow
                 var next = new FilePanelPreferences((FileColumnLayout)columns.SelectedIndex, (FileSortOrder)sort.SelectedIndex,
                     order.SelectedIndex == 1, foldersFirst.IsChecked == true, (int)Math.Clamp(height.Value, 24, 52),
                     download.Length == 0 ? null : Path.GetFullPath(download), style.SelectedIndex == 0);
-                Directory.CreateDirectory(WorkspaceStore.CustomFolder);
-                var temporary = Path.Combine(WorkspaceStore.CustomFolder, $".files-{Guid.NewGuid():N}.tmp");
-                try
-                {
-                    File.WriteAllText(temporary, JsonSerializer.Serialize(next, FilePreferencesJson));
-                    File.Move(temporary, FilePreferencesPath, overwrite: true);
-                }
-                finally { TryDelete(temporary); }
+                WorkspaceFile.WriteJson(FilePreferencesPath, next, FilePreferencesJson);
 
                 filePanelPreferences = next;
                 foreach (var pane in panes.Values)

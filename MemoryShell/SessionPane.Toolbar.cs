@@ -19,17 +19,52 @@ internal sealed partial class SessionPane
     private IReadOnlyList<RemoteEntry> directoryEntries = [];
     private Grid splitter = null!;
     private TabView lower = null!;
+    private Border lowerFrame = null!;
     private bool lowerPanelCollapsed;
     private GridLength expandedLowerHeight;
     private double expandedLowerMinimum;
 
     internal bool LowerPanelCollapsed => lowerPanelCollapsed;
+    // The trailing edge mirrors with the tab strip; the button order does not.
+    internal ContentControl TabActionsHost { get; } = new() { FlowDirection = FlowDirection.LeftToRight,
+        HorizontalAlignment = HorizontalAlignment.Right, HorizontalContentAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10, 3, 10, -1) };
+    private readonly Border tabActionsFrame = new() { CornerRadius = new CornerRadius(10, 10, 0, 0), BorderThickness = new Thickness(1, 1, 1, 0),
+        BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"), Padding = new Thickness(8, 4, 8, 4) };
+    private bool? actionsAtTabs;
+    private readonly ContentControl commandActionsHost = new();
+    private StackPanel sessionActions = null!;
+    private readonly Button expandTerminalButton = new();
+    private bool terminalExpanded, lowerBeforeExpansion, changingExpansion;
+    internal bool TerminalExpanded => terminalExpanded;
 
-    private Border BuildCommandBar(Func<Task> reconnect, Func<Task> editConnection, Action fullScreen)
+    internal void SetActionsAtTabs(bool atTabs)
+    {
+        if (actionsAtTabs == atTabs) return;
+        actionsAtTabs = atTabs;
+        TabActionsHost.Content = null;
+        tabActionsFrame.Child = null;
+        commandActionsHost.Content = null;
+        if (atTabs) { tabActionsFrame.Child = sessionActions; TabActionsHost.Content = tabActionsFrame; }
+        else commandActionsHost.Content = sessionActions;
+        Padding = new Thickness(10, atTabs ? 0 : 8, 10, 8);
+    }
+
+    internal void ToggleTerminalExpanded()
+    {
+        if (!terminalExpanded) lowerBeforeExpansion = lowerPanelCollapsed;
+        terminalExpanded = !terminalExpanded;
+        changingExpansion = true;
+        try { SetLowerPanelCollapsed(terminalExpanded || lowerBeforeExpansion); }
+        finally { changingExpansion = false; }
+        SetToolbarLabel(expandTerminalButton, L10n.Get(terminalExpanded ? "TerminalRestore" : "TerminalExpand"));
+    }
+
+    private Border BuildCommandBar(Func<Task> reconnect, Func<Task> editConnection)
     {
         command.PlaceholderText = L10n.Get("S87B144420284");
         command.MinWidth = 0;
-        command.MinHeight = 30;
+        command.MinHeight = 34;
         command.FontSize = 13;
         command.Padding = new Thickness(7, 4, 7, 4);
         command.VerticalAlignment = VerticalAlignment.Center;
@@ -57,9 +92,9 @@ internal sealed partial class SessionPane
             terminal.FocusTerminal();
             return Task.CompletedTask;
         });
-        var fullscreen = ToolbarButton(new Button(), L10n.Get("S2C34A5B066E2"), new FontIcon { Glyph = "\uE740", FontSize = 14 }, () =>
+        var fullscreen = ToolbarButton(expandTerminalButton, L10n.Get("TerminalExpand"), new FontIcon { Glyph = "\uE740", FontSize = 14 }, () =>
         {
-            fullScreen();
+            ToggleTerminalExpanded();
             terminal.FocusTerminal();
             return Task.CompletedTask;
         });
@@ -73,46 +108,46 @@ internal sealed partial class SessionPane
         });
         UpdateConnectionButton();
 
-        var actions = new StackPanel
+        sessionActions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 3,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { historyButton, optionsButton, connectionButton, copy, paste, find, settings, collapseButton, fullscreen }
+            Children = { connectionButton, copy, paste, find, settings, fullscreen }
         };
-        var content = new Grid { ColumnSpacing = 8, RowSpacing = 4 };
+        var commandActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center,
+            Children = { historyButton, optionsButton, commandActionsHost } };
+        var fixedActions = new StackPanel { Orientation = Orientation.Horizontal, Children = { collapseButton } };
+        var content = new Grid { ColumnSpacing = 8 };
         content.ColumnDefinitions.Add(new ColumnDefinition());
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.Children.Add(command);
-        SetColumn(actions, 1);
-        content.Children.Add(actions);
-        EnableCommandFocusShortcut();
+        SetColumn(commandActions, 1);
+        content.Children.Add(commandActions);
+        SetColumn(fixedActions, 2); content.Children.Add(fixedActions);
         content.SizeChanged += (_, args) =>
         {
-            var compact = args.NewSize.Width < 880;
-            SetColumnSpan(command, compact ? 2 : 1);
-            SetColumn(actions, compact ? 0 : 1);
-            SetColumnSpan(actions, compact ? 2 : 1);
-            SetRow(actions, compact ? 1 : 0);
+            var narrow = args.NewSize.Width < 650;
+            SetColumnSpan(command, narrow ? 2 : 1);
+            SetRow(commandActions, narrow ? 1 : 0);
+            SetColumn(commandActions, narrow ? 0 : 1);
+            SetColumnSpan(commandActions, narrow ? 3 : 1);
         };
+        EnableCommandFocusShortcut();
+        SetActionsAtTabs(true);
 
-        var bar = new Border
-        {
-            Background = WorkspaceTheme.Brush("ShellToolbarBrush"),
-            BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"),
-            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(5, 3, 5, 3), Child = content
-        };
         return new Border
         {
-            Background = WorkspaceTheme.Brush("ShellBaseBrush"),
+            Background = WorkspaceTheme.Brush("ShellPaneBrush"),
             BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"),
             BorderThickness = new Thickness(1, 0, 1, 1),
-            Padding = new Thickness(5, 3, 5, 5),
-            Child = bar
+            CornerRadius = new CornerRadius(0, 0, 8, 8),
+            Padding = new Thickness(10, 8, 10, 8),
+            Child = content
         };
     }
 
@@ -120,6 +155,9 @@ internal sealed partial class SessionPane
 
     private void EnableCommandFocusShortcut()
     {
+        var escape = new KeyboardAccelerator { Key = VirtualKey.Escape, ScopeOwner = this };
+        escape.Invoked += (_, args) => { if (terminalExpanded) { ToggleTerminalExpanded(); args.Handled = true; } };
+        KeyboardAccelerators.Add(escape);
         var controlOnly = false;
         long lastTap = -1000;
         static bool IsControl(VirtualKey key) => key is VirtualKey.Control or VirtualKey.LeftControl or VirtualKey.RightControl;
@@ -154,6 +192,11 @@ internal sealed partial class SessionPane
 
     internal void SetLowerPanelCollapsed(bool collapsed)
     {
+        if (!changingExpansion && terminalExpanded)
+        {
+            terminalExpanded = false;
+            SetToolbarLabel(expandTerminalButton, L10n.Get("TerminalExpand"));
+        }
         if (lowerPanelCollapsed == collapsed)
             return;
         lowerPanelCollapsed = collapsed;
@@ -166,7 +209,7 @@ internal sealed partial class SessionPane
         row.MinHeight = collapsed ? 0 : expandedLowerMinimum;
         row.Height = collapsed ? new GridLength(0) : expandedLowerHeight;
         RowDefinitions[2].Height = new GridLength(collapsed ? 0 : 7);
-        splitter.Visibility = lower.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        splitter.Visibility = lowerFrame.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         collapseGlyph.Glyph = collapsed ? "\uE70E" : "\uE70D";
         if (collapseButton is { } button)
             SetToolbarLabel(button, collapsed ? L10n.Get("S8F8D334AF280") : L10n.Get("S764D6C9AC754"));
@@ -184,6 +227,7 @@ internal sealed partial class SessionPane
         connectionGlyph.Foreground = connected ? ToolbarBrush(45, 178, 99) : ToolbarBrush(235, 70, 82);
         SetToolbarLabel(connectionButton, attemptFinished ? L10n.Get("S3E0CA6923EE4") :
             disconnectRequested || closingConnection ? L10n.Get("S1CDE2F91091B") : connected ? L10n.Get("SA33F3804768E") : L10n.Get("S3687F953CFE8"));
+        ActivityChanged?.Invoke();
     }
 
     private Button ToolbarButton(Button button, string label, IconElement icon, Func<Task> action)
@@ -194,6 +238,7 @@ internal sealed partial class SessionPane
         button.Height = 34;
         button.MinHeight = 0;
         button.Padding = new Thickness(0);
+        button.CornerRadius = new CornerRadius(6);
         button.Background = WorkspaceTheme.Brush("ShellToolbarBrush");
         button.BorderThickness = new Thickness(0);
         SetToolbarLabel(button, label);

@@ -55,15 +55,8 @@ internal static class L10n
     public static void SavePreference(string value)
     {
         if (value != "system" && !Languages.Any(item => item.Code == value)) throw new ArgumentOutOfRangeException(nameof(value));
-        Directory.CreateDirectory(WorkspaceStore.CustomFolder);
-        var temporary = SettingsPath + ".tmp";
-        try
-        {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(value));
-            File.Move(temporary, SettingsPath, true);
-            Preference = value;
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        WorkspaceFile.WriteJson(SettingsPath, value);
+        Preference = value;
     }
 
     public static string Get(string key) => current.GetValueOrDefault(key) ?? English.Value.GetValueOrDefault(key) ?? Source.Value.GetValueOrDefault(key) ?? key;

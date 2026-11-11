@@ -11,14 +11,16 @@ internal sealed class SettingsTabHost : Grid
     private readonly Button save = new() { Content = L10n.Get("SA3030BF8F16D"), MinWidth = 108 };
     private readonly TextBlock message = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     private bool busy;
+    public bool IsSaving => busy;
 
-    public SettingsTabHost(double height)
+    public SettingsTabHost()
     {
-        Height = height;
         RowDefinitions.Add(new RowDefinition());
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Children.Add(tabs);
-        var footer = new Grid { ColumnSpacing = 16, Padding = new Thickness(12, 12, 12, 0) };
+        save.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+        var footer = new Grid { ColumnSpacing = 16, Padding = new Thickness(16, 12, 16, 0),
+            BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
         footer.ColumnDefinitions.Add(new ColumnDefinition());
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.Children.Add(message); Grid.SetColumn(save, 1); footer.Children.Add(save);
@@ -37,9 +39,9 @@ internal sealed class SettingsTabHost : Grid
     public void Add(string title, UIElement content, Func<Task>? apply = null, bool scroll = true)
     {
         var item = new TabViewItem { Header = title, IsClosable = false,
-            Content = scroll ? new ScrollViewer { Content = content, Padding = new Thickness(8, 10, 8, 6),
+            Content = scroll ? new ScrollViewer { Content = new Grid { MaxWidth = 1000, HorizontalAlignment = HorizontalAlignment.Left, Children = { content } }, Padding = new Thickness(20, 24, 20, 20),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Disabled, HorizontalContentAlignment = HorizontalAlignment.Stretch }
-                : new Grid { Padding = new Thickness(8, 10, 8, 6), Children = { content } } };
+                : new Grid { Padding = new Thickness(20, 24, 20, 12), Children = { content } } };
         saves[item] = apply; tabs.TabItems.Add(item); tabs.SelectedItem ??= item; RefreshSave();
     }
 

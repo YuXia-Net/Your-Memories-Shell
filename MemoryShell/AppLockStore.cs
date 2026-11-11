@@ -17,21 +17,37 @@ internal sealed record AppLockState(
     int Failures = 0,
     long RetryAfter = 0);
 
-internal static class AppLockStore
+internal sealed class AppLockStore(WorkspaceStore workspace, VaultDatabase database)
 {
     private const int SaltSize = 32;
     private const int KeySize = 32;
     private const int Iterations = 600_000;
     private const int MaximumProtectedSize = 16 * 1024;
     private static readonly byte[] Entropy = "MemoryShell.DeviceLock.v1"u8.ToArray();
-    private static readonly string PathName = Path.Combine(WorkspaceStore.Folder, "app-lock.dat");
+    private static readonly string LegacyPath = Path.Combine(WorkspaceStore.Folder, "app-lock.dat");
 
-    public static AppLockState? Load()
+    public AppLockState? Load()
+    {
+        var state = workspace.StartupLock;
+        Validate(state);
+        return state is null ? null : state with { Salt = state.Salt.ToArray(), Hash = state.Hash.ToArray() };
+    }
+
+    internal static void ImportLegacy(WorkspaceStore workspace, VaultDatabase database)
+    {
+        if (workspace.LockSettingsVersion != 0) return;
+        workspace.StartupLock = ReadLegacy();
+        workspace.LockSettingsVersion = 1;
+        workspace.Save(database);
+        File.Delete(LegacyPath);
+    }
+
+    private static AppLockState? ReadLegacy()
     {
         byte[] protectedBytes;
         try
         {
-            using var file = new FileStream(PathName, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            using var file = new FileStream(LegacyPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
             if (file.Length is <= 0 or > MaximumProtectedSize)
                 throw new InvalidDataException();
             protectedBytes = new byte[(int)file.Length];
@@ -51,10 +67,8 @@ internal static class AppLockStore
         {
             plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
             var state = JsonSerializer.Deserialize<AppLockState>(plaintext);
-            if (state is null || !Enum.IsDefined(state.Kind) || state.Salt?.Length != SaltSize ||
-                state.Hash?.Length != KeySize || !IsValidLength(state.Kind, state.CredentialLength) ||
-                state.Failures is < 0 or > 9 || state.RetryAfter < 0)
-                throw InvalidSettings();
+            if (state is null) throw InvalidSettings();
+            Validate(state);
             return state;
         }
         catch (Exception ex) when (ex is JsonException or CryptographicException)
@@ -68,24 +82,32 @@ internal static class AppLockStore
         }
     }
 
-    public static void Set(AppLockKind? kind, string credential)
+    internal static void Validate(AppLockState? state)
     {
-        if (kind is null)
-        {
-            File.Delete(PathName);
-            return;
-        }
+        if (state is not null && (!Enum.IsDefined(state.Kind) || state.Salt?.Length != SaltSize ||
+            state.Hash?.Length != KeySize || !IsValidLength(state.Kind, state.CredentialLength) ||
+            state.Failures is < 0 or > 9 || state.RetryAfter < 0)) throw InvalidSettings();
+    }
 
+    public static AppLockState? Create(AppLockKind? kind, string credential)
+    {
+        if (kind is null) return null;
         if (!IsValid(kind.Value, credential))
             throw new ArgumentException(Requirement(kind.Value));
 
         var salt = RandomNumberGenerator.GetBytes(SaltSize);
         var hash = Derive(credential, salt);
-        try { Save(new AppLockState(kind.Value, salt, hash, credential.Length)); }
-        finally { CryptographicOperations.ZeroMemory(hash); }
+        return new AppLockState(kind.Value, salt, hash, credential.Length);
     }
 
-    public static (bool Accepted, long RetryAfter) Verify(string credential)
+    public void Set(AppLockKind? kind, string credential)
+    {
+        var state = Create(kind, credential);
+        try { Save(state); }
+        finally { if (state is not null) CryptographicOperations.ZeroMemory(state.Hash); }
+    }
+
+    public async Task<(bool Accepted, long RetryAfter, bool Deferred)> VerifyAsync(string credential)
     {
         var state = Load() ?? throw InvalidSettings();
         try
@@ -95,16 +117,18 @@ internal static class AppLockStore
 
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             if (state.RetryAfter > now)
-                return (false, state.RetryAfter);
+                return (false, state.RetryAfter, true);
 
-            var candidate = Derive(credential, state.Salt);
+            var candidate = await Task.Run(() => Derive(credential, state.Salt));
             try
             {
+                if (workspace.StartupLock is not { } current || !current.Salt.AsSpan().SequenceEqual(state.Salt))
+                    return default;
                 if (CryptographicOperations.FixedTimeEquals(candidate, state.Hash))
                 {
                     if (state.Failures != 0 || state.RetryAfter != 0)
                         Save(state with { Failures = 0, RetryAfter = 0 });
-                    return (true, 0);
+                    return (true, 0, false);
                 }
             }
             finally { CryptographicOperations.ZeroMemory(candidate); }
@@ -113,9 +137,16 @@ internal static class AppLockStore
             var delay = failures < 3 ? 0 : Math.Min(60, 1 << (failures - 2));
             var retryAfter = delay == 0 ? 0 : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + delay * 1000;
             Save(state with { Failures = failures, RetryAfter = retryAfter });
-            return default;
+            return (false, retryAfter, false);
         }
         finally { CryptographicOperations.ZeroMemory(state.Hash); }
+    }
+
+    public async Task SetAsync(AppLockKind? kind, string credential)
+    {
+        var state = await Task.Run(() => Create(kind, credential));
+        try { Save(state); }
+        finally { if (state is not null) CryptographicOperations.ZeroMemory(state.Hash); }
     }
 
     private static bool IsValidLength(AppLockKind kind, int length) => kind switch
@@ -135,25 +166,20 @@ internal static class AppLockStore
     private static byte[] Derive(string credential, byte[] salt) =>
         Rfc2898DeriveBytes.Pbkdf2(credential, salt, Iterations, HashAlgorithmName.SHA256, KeySize);
 
-    private static void Save(AppLockState state)
+    private void Save(AppLockState? state)
     {
-        var temporary = Path.Combine(WorkspaceStore.Folder, $".app-lock-{Guid.NewGuid():N}.tmp");
-        var plaintext = JsonSerializer.SerializeToUtf8Bytes(state);
+        var previous = workspace.StartupLock;
+        workspace.StartupLock = state is null ? null : state with { Salt = state.Salt.ToArray(), Hash = state.Hash.ToArray() };
         try
         {
-            var encrypted = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.CurrentUser);
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                file.Write(encrypted);
-                file.Flush(flushToDisk: true);
-            }
-            File.Move(temporary, PathName, overwrite: true);
+            workspace.Save(database);
+            if (previous is not null) CryptographicOperations.ZeroMemory(previous.Hash);
         }
-        finally
+        catch
         {
-            CryptographicOperations.ZeroMemory(plaintext);
-            if (File.Exists(temporary))
-                File.Delete(temporary);
+            if (workspace.StartupLock is { } failed) CryptographicOperations.ZeroMemory(failed.Hash);
+            workspace.StartupLock = previous;
+            throw;
         }
     }
 

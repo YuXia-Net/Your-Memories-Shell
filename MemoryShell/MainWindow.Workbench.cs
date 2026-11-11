@@ -7,6 +7,17 @@ namespace MemoryShell;
 
 public sealed partial class MainWindow
 {
+    private void RefreshSessionActions()
+    {
+        if (Sessions is null) return;
+        Sessions.FlowDirection = workspaceAppearance.TerminalActionsAtTabs && workspaceAppearance.TerminalActionsOnLeft
+            ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+        foreach (var item in Sessions.TabItems.OfType<TabViewItem>()) item.FlowDirection = FlowDirection.LeftToRight;
+        var footer = workspaceAppearance.TerminalActionsAtTabs && Sessions.SelectedItem is TabViewItem tab
+            && panes.TryGetValue(tab, out var pane) ? pane.TabActionsHost : null;
+        if (!ReferenceEquals(Sessions.TabStripFooter, footer)) Sessions.TabStripFooter = footer;
+        RefreshSessionIndicators();
+    }
     private double sidebarPreferredWidth = 252;
     private WorkspaceLayout workspaceLayout = new();
     private bool layoutReady;
@@ -34,6 +45,7 @@ public sealed partial class MainWindow
 
     private void AddStartTab()
     {
+        if (SessionWorkspace is not null) NavigateWorkspace(WorkspacePage.Sessions);
         var tab = new TabViewItem { Header = L10n.Get("S9C5D341609CD"), Tag = "start", IsClosable = true };
         Sessions.TabItems.Add(tab);
         Sessions.SelectedItem = tab;
@@ -52,6 +64,9 @@ public sealed partial class MainWindow
 
     private void InitializeWorkspaceShortcuts()
     {
+        var escape = new KeyboardAccelerator { Key = VirtualKey.Escape };
+        escape.Invoked += (_, args) => { if (probeFullScreen) { ToggleProbeFullScreen(); args.Handled = true; } };
+        Root.KeyboardAccelerators.Add(escape);
         Add(VirtualKey.T, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, AddStartTab);
         Add(VirtualKey.N, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => NewProfile_Click(this, new RoutedEventArgs()));
         Add(VirtualKey.L, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => ConnectionManager_Click(this, new RoutedEventArgs()));
@@ -82,8 +97,8 @@ public sealed partial class MainWindow
     {
         if (sidebarPointer != args.Pointer.PointerId) return;
         sidebarPreferredWidth = Math.Clamp(sidebarDragWidth + args.GetCurrentPoint(Root).Position.X - sidebarDragOrigin,
-            166, Math.Max(166, Root.ActualWidth - 360));
-        SetSidebarWidth(Root.ActualWidth);
+            166, Math.Max(166, Root.ActualWidth - 416));
+        SetSidebarWidth(Root.ActualWidth - 56);
         args.Handled = true;
     }
 

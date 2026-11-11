@@ -55,8 +55,6 @@ public sealed partial class MainWindow
         openingWorkspace = true;
         try
         {
-            if (!await AppLockDialog.RequireAsync(Root.XamlRoot) || closed)
-                return false;
             if (!File.Exists(WorkspaceStore.VaultPath))
                 return await ShowInitializationWizardAsync();
             var opened = await Task.Run(WorkspaceStore.TryUnlockForCurrentUser);
@@ -68,8 +66,19 @@ public sealed partial class MainWindow
                 result.Database.Dispose();
                 return false;
             }
-            ActivateVault(result.Store, result.Database);
-            return true;
+            var activated = false;
+            try
+            {
+                if (!await AppLockDialog.RequireAsync(Root.XamlRoot, new AppLockStore(result.Store, result.Database)) || closed)
+                    return false;
+                ActivateVault(result.Store, result.Database);
+                activated = true;
+                return true;
+            }
+            finally
+            {
+                if (!activated) { result.Store.ClearSensitiveData(); result.Database.Dispose(); }
+            }
         }
         finally
         {
@@ -148,6 +157,8 @@ public sealed partial class MainWindow
 
     private void ClearUnlockedWorkspace()
     {
+        finishSettings?.Invoke();
+        if (!closed) NavigateWorkspace(WorkspacePage.Sessions);
         CloseMonitorWall();
         cloudTimer?.Stop();
         unlockedLifetime?.Cancel();
@@ -159,6 +170,8 @@ public sealed partial class MainWindow
         foreach (var pane in panes.Values)
             pane.Dispose();
         panes.Clear();
+        if (closed) sessionIndicators.Dispose();
+        else RefreshSessionIndicators();
         CloseMemoryTerminal();
         if (!closed)
         {
@@ -183,6 +196,7 @@ public sealed partial class MainWindow
     private void CloseVault()
     {
         closed = true;
+        TransferNotifications.Close();
         try { ClearUnlockedWorkspace(); }
         finally
         {
@@ -201,9 +215,9 @@ public sealed partial class MainWindow
     {
         try
         {
-            if (restoreInProgress || database is null)
+            if (restoreInProgress || database is null || activeSettingsTabs?.IsSaving == true)
                 return;
-            if (!AppLockDialog.IsEnabled)
+            if (store.StartupLock is null)
             {
                 Status.Text = L10n.Get("SD893992DB932");
                 return;
@@ -317,7 +331,6 @@ public sealed partial class MainWindow
         try
         {
             var active = database ?? throw new InvalidOperationException(L10n.Get("S56E180F830C3"));
-            if (!await EnsureMasterAsync(active)) return;
             var picker = new FileSavePicker { SuggestedFileName = "memoryshell-backup" };
             picker.FileTypeChoices.Add(L10n.Get("S520D8AB4F6DC"), new List<string> { ".sqlite" });
             WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
@@ -341,15 +354,16 @@ public sealed partial class MainWindow
 
     private async void RestoreVault_Click(object sender, RoutedEventArgs e) => await PickLocalRestoreAsync();
 
-    private async Task PickLocalRestoreAsync(Action<string>? showError = null)
+    private async Task PickLocalRestoreAsync(Action<string>? showError = null, string? destination = null)
     {
         try
         {
             var picker = new FileOpenPicker();
             picker.FileTypeFilter.Add(".sqlite");
+            picker.FileTypeFilter.Add(".sqlite3");
             WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
             if (await picker.PickSingleFileAsync() is { } file)
-                await RestoreSnapshotAsync(file.Path);
+                await RestoreSnapshotAsync(file.Path, destination);
         }
         catch (Exception ex)
         {
@@ -360,31 +374,32 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task RestoreSnapshotAsync(string source)
+    private async Task RestoreSnapshotAsync(string source, string? destination = null)
     {
         if (restoreInProgress)
             return;
-        if (database is { HasMaster: false } current && !await EnsureMasterAsync(current))
-            return;
+        var path = destination ?? database?.FilePath ?? WorkspaceStore.VaultPath;
 
         var password = new PasswordBox { Header = L10n.Get("SFAE4AA626BC4") };
         var error = ErrorText();
         var warning = new TextBlock
         {
-            Text = !File.Exists(WorkspaceStore.VaultPath)
+            Text = !File.Exists(path)
                 ? L10n.Get("SB7BE0831FA9B")
                 : L10n.Get("S5180C4E354F3"),
             TextWrapping = TextWrapping.Wrap
         };
         var fields = new StackPanel { MinWidth = 350, Spacing = 9, Children = { warning, password, error } };
         var dialog = Dialog(L10n.Get("S444F1E08B1B3"), fields, L10n.Get("SE7EB07075F22"));
-        var stage = Path.Combine(Path.GetDirectoryName(WorkspaceStore.VaultPath)!, $".restore-{Guid.NewGuid():N}.sqlite");
+        var stage = Path.Combine(Path.GetDirectoryName(path)!, $".restore-{Guid.NewGuid():N}.sqlite");
+        var wasUnlocked = database is not null;
         restoreInProgress = true;
         try
         {
             if (new FileInfo(source).Length is <= 0 or > 128L * 1024 * 1024)
                 throw new IOException(L10n.Get("SA94644C3956F"));
 
+            Directory.CreateDirectory(Path.GetDirectoryName(stage)!);
             await Task.Run(() => File.Copy(source, stage, overwrite: false));
             dialog.PrimaryButtonClick += async (_, args) =>
             {
@@ -394,19 +409,36 @@ public sealed partial class MainWindow
                 {
                     await Task.Run(() =>
                     {
-                        using var candidate = VaultDatabase.Open(stage, supplied);
+                        using var candidate = VaultDatabase.Open(stage, supplied, remember: true);
                         WorkspaceStore.Read(candidate).ClearSensitiveData();
                     });
                     if (closed)
                         return;
 
                     ClearUnlockedWorkspace();
-                    var path = WorkspaceStore.VaultPath;
-                    if (File.Exists(path))
-                        File.Replace(stage, path, Path.Combine(Path.GetDirectoryName(path)!, $"workspace-before-restore-{Guid.NewGuid():N}.sqlite"));
-                    else
-                        File.Move(stage, path);
-                    var opened = await Task.Run(() => WorkspaceStore.Unlock(supplied));
+                    (WorkspaceStore Store, VaultDatabase Database) opened;
+                    try
+                    {
+                        opened = await Task.Run(() => VaultDatabase.InstallSnapshot(stage, path, () =>
+                        {
+                            var restored = WorkspaceStore.Unlock(supplied, path);
+                            try
+                            {
+                                if (destination is not null) WorkspaceStore.SaveDatabaseFolder(Path.GetDirectoryName(path)!);
+                                return restored;
+                            }
+                            catch { restored.Store.ClearSensitiveData(); restored.Database.Dispose(); throw; }
+                        }));
+                    }
+                    catch (Exception failure) when (failure is not VaultDatabase.RestoreRollbackException)
+                    {
+                        if (wasUnlocked && File.Exists(path) && await Task.Run(WorkspaceStore.TryUnlockForCurrentUser) is { } previous)
+                        {
+                            if (closed) { previous.Store.ClearSensitiveData(); previous.Database.Dispose(); }
+                            else ActivateVault(previous.Store, previous.Database);
+                        }
+                        throw;
+                    }
                     if (closed)
                     {
                         opened.Store.ClearSensitiveData();
@@ -424,7 +456,6 @@ public sealed partial class MainWindow
                 }
             };
 
-            var wasUnlocked = database is not null;
             await dialog.ShowAsync();
             if (wasUnlocked && database is null && !closed && !await PromptUnlockAsync())
                 Close();

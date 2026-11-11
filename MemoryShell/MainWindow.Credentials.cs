@@ -7,51 +7,9 @@ namespace MemoryShell;
 
 public sealed partial class MainWindow
 {
-    private async Task<bool> EnsureMasterAsync(VaultDatabase active)
-    {
-        if (active.IsRandomOnly)
-        {
-            Status.Text = L10n.Get("S93039B792C00");
-            return false;
-        }
-        if (active.HasMaster)
-            return true;
-
-        var first = new PasswordBox { Header = L10n.Get("S0E069845CBA3") };
-        var again = new PasswordBox { Header = L10n.Get("SCFC15518B112") };
-        var error = ErrorText();
-        var fields = new StackPanel { Spacing = 8, MinWidth = 345, Children =
-        {
-            new TextBlock { Text = L10n.Get("SA07F164E1578"), TextWrapping = TextWrapping.Wrap },
-            first, again, error
-        } };
-        var dialog = Dialog(L10n.Get("S424CBBCA8A33"), fields, L10n.Get("SDF3D58C7D84B"));
-        dialog.PrimaryButtonClick += async (_, args) =>
-        {
-            using var deferral = new DialogDeferral(args.GetDeferral());
-            try
-            {
-                var supplied = first.Password;
-                if (supplied != again.Password)
-                    throw new ArgumentException(L10n.Get("S2991F45A2625"));
-                await Task.Run(() => active.EnrollMaster(supplied));
-                first.Password = again.Password = "";
-                vaultRevision++;
-                StartCloudSchedule();
-            }
-            catch (Exception ex)
-            {
-                args.Cancel = true;
-                error.Text = ex.Message;
-            }
-        };
-        try { return await dialog.ShowAsync() == ContentDialogResult.Primary && database == active; }
-        finally { first.Password = again.Password = ""; }
-    }
-
     private async Task<bool> VerifyMasterAsync(string action, string? notice = null)
     {
-        if (database is not { } active || !await EnsureMasterAsync(active))
+        if (database is not { } active)
             return false;
 
         var password = new PasswordBox { Header = L10n.Get("SE88ECA7923F1") };

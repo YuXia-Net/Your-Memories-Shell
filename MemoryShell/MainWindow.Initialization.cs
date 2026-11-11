@@ -19,14 +19,10 @@ public sealed partial class MainWindow
         var selectedSkin = workspaceAppearance.Skin;
         var password = new PasswordBox { Header = L10n.Get("S2EA324EC7475"), PasswordRevealMode = PasswordRevealMode.Hidden };
         var confirm = new PasswordBox { Header = L10n.Get("S76F3655F0E69"), PasswordRevealMode = PasswordRevealMode.Hidden };
-        var keyMode = new RadioButtons { MaxColumns = 2 };
-        keyMode.Items.Add(L10n.Get("SAE9D19702667"));
-        keyMode.Items.Add(L10n.Get("S70ACEE2604F9"));
-        keyMode.SelectedIndex = 0;
         var keyFields = new StackPanel { Spacing = 12, Children = { password, confirm } };
         var keyHint = SetupText(L10n.Get("S986001347B84"), 14, "ShellMutedBrush");
         var security = SettingsPages.Section(L10n.Get("S3044EF88D051"),
-            SetupText(L10n.Get("EncryptionChoiceOnce"), 13, "ShellMutedBrush"), keyMode, keyFields, keyHint);
+            keyFields, keyHint);
         var restored = new InfoBar { IsClosable = false, Severity = InfoBarSeverity.Success, Message = L10n.Get("SA0E8E55A006B") };
         var local = new Button { Content = L10n.Get("S9870AD8E01B4"), HorizontalAlignment = HorizontalAlignment.Stretch };
         var cloud = new Button { Content = L10n.Get("S59AE8B01B5FA"), HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -40,14 +36,17 @@ public sealed partial class MainWindow
             WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
             if (await picker.PickSingleFolderAsync() is { } folder) location.Text = folder.Path;
         };
-        var toolbarLayout = new ToolbarLayoutPicker(workspaceAppearance.LogoOnLeft);
+        var toolbarLayout = new ToolbarLayoutPicker(workspaceAppearance.LogoOnLeft, compact: true);
+        var terminalActions = new TerminalActionsPicker(workspaceAppearance, showHeader: false);
+        terminalActions.SelectionChanged += (_, _) => PresentWorkspaceAppearance(workspaceAppearance with
+        { TerminalActionsAtTabs = terminalActions.AtTabs, TerminalActionsOnLeft = terminalActions.OnLeft }, workspaceWallpaper);
         toolbarLayout.SelectionChanged += (_, _) => PresentWorkspaceAppearance(workspaceAppearance with { LogoOnLeft = toolbarLayout.SelectedIndex == 0 }, workspaceWallpaper);
         var fileStyle = new RadioButtons { MaxColumns = 2 };
         fileStyle.Items.Add(L10n.Get("ExplorerStyle"));
         fileStyle.Items.Add(L10n.Get("CompactStyle"));
         fileStyle.SelectedIndex = 0;
         var restore = SettingsPages.Section(L10n.Get("SCC3B6A50215A"), local, cloud);
-        var vaultPage = new StackPanel { Spacing = 24, Children = { restored, security,
+        var vaultPage = new StackPanel { Spacing = 12, Children = { restored, security,
             SettingsPages.Section(L10n.Get("DatabaseLocation"), location, chooseLocation), restore } };
 
         var themes = new RadioButtons { MaxColumns = 3 };
@@ -89,16 +88,14 @@ public sealed partial class MainWindow
         var hideAddresses = new ToggleSwitch { Header = L10n.Get("SC0DB9D8A9223"), IsOn = store.HideDeviceAddress };
         var hiddenFiles = new ToggleSwitch { Header = L10n.Get("SDDC6575A723D"), IsOn = store.ShowHiddenFiles };
         var clearCommand = new ToggleSwitch { Header = L10n.Get("S4052F4A2B7AC"), IsOn = store.ClearCommandAfterSend };
-        var habits = new StackPanel
-        {
-            Spacing = 24,
-            Children =
-            {
-                SettingsPages.Section(L10n.Get("S82479CB6CA73"), hideAddresses, SetupText(L10n.Get("S8C8E211112F3"), 13, "ShellMutedBrush")),
-                SettingsPages.Section(L10n.Get("S595EFC6C69E5"), fileStyle, hiddenFiles, clearCommand),
-                SettingsPages.Section(L10n.Get("TopBarLayout"), toolbarLayout)
-            }
-        };
+        var habits = new StackPanel { Spacing = 12, Children = {
+            SetupSection(L10n.Get("TerminalActionsPosition"), terminalActions),
+            new SettingsColumns(
+            new StackPanel { Spacing = 12, Children = {
+                SetupSection(L10n.Get("TopBarLayout"), toolbarLayout),
+                SetupSection(L10n.Get("S82479CB6CA73"), hideAddresses, SetupText(L10n.Get("S8C8E211112F3"), 12, "ShellMutedBrush")) } },
+            new StackPanel { Spacing = 12, Children = {
+                SetupSection(L10n.Get("S595EFC6C69E5"), fileStyle, hiddenFiles, clearCommand) } }, 820) } };
         UIElement[] pages = [appearance, vaultPage, lockPage, habits];
         string[] titles = [L10n.Get("S73C8BFB65D65"), L10n.Get("S8A97BAD569D4"), L10n.Get("S8687D50A3DA0"), L10n.Get("SD806EDEF54B2")];
         string[] descriptions = [L10n.Get("S4533B5A8E211"), L10n.Get("S48558A5E37C4"), L10n.Get("S518D8FC77796"), L10n.Get("S1AC2799AABD0")];
@@ -117,9 +114,10 @@ public sealed partial class MainWindow
         var body = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch };
         if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
             body.ContentTransitions = new TransitionCollection { new EntranceThemeTransition { FromHorizontalOffset = 0, FromVerticalOffset = 12 } };
-        var form = new StackPanel { Spacing = 24, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Stretch,
-            Children = { new StackPanel { Spacing = 8, Children = { title, description } }, body } };
-        var scroll = new ScrollViewer { Content = form, Padding = new Thickness(28, 24, 28, 24), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Disabled };
+        var form = new StackPanel { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Stretch,
+            Children = { new StackPanel { Spacing = 4, Children = { title, description } }, body } };
+        var scroll = new ScrollViewer { Content = form, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(16), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Disabled };
         var error = SetupText("", 13, "ShellErrorBrush");
         error.Visibility = Visibility.Collapsed;
         var back = new Button { Content = L10n.Get("SDA336FDC0DBD") };
@@ -150,9 +148,8 @@ public sealed partial class MainWindow
         page.SizeChanged += (_, args) =>
         {
             navigation.PaneDisplayMode = args.NewSize.Width < 850 ? NavigationViewPaneDisplayMode.Top : NavigationViewPaneDisplayMode.Left;
-            scroll.Padding = new Thickness(args.NewSize.Width < 700 ? 16 : 28, 24, args.NewSize.Width < 700 ? 16 : 28, 24);
+            scroll.Padding = new Thickness(args.NewSize.Width < 700 ? 12 : 16);
             themes.MaxColumns = args.NewSize.Width < 640 ? 1 : 3;
-            keyMode.MaxColumns = args.NewSize.Width < 640 ? 1 : 2;
         };
         void SetError(string message)
         {
@@ -175,17 +172,9 @@ public sealed partial class MainWindow
         {
             if (args.SelectedItem is NavigationViewItem { Tag: int index }) ShowStep(index);
         };
-        keyMode.SelectionChanged += (_, _) =>
-        {
-            var personal = keyMode.SelectedIndex == 0;
-            keyFields.Visibility = personal ? Visibility.Visible : Visibility.Collapsed;
-            keyHint.Text = personal ? L10n.Get("S986001347B84") : L10n.Get("SA39960DCA491");
-            keyHint.Foreground = WorkspaceTheme.Brush(personal ? "ShellMutedBrush" : "ShellErrorBrush");
-            SetError("");
-        };
         bool ValidateVault()
         {
-            if (database is not null || keyMode.SelectedIndex != 0) return true;
+            if (database is not null) return true;
             if (password.Password.Length == 0) { GoTo(1); SetError(L10n.Get("S759BCEF7F6D9")); password.Focus(FocusState.Programmatic); return false; }
             if (password.Password != confirm.Password) { GoTo(1); SetError(L10n.Get("S1FEE59BF77DC")); confirm.Focus(FocusState.Programmatic); return false; }
             return true;
@@ -213,21 +202,22 @@ public sealed partial class MainWindow
         async Task CompleteAsync()
         {
             if (!ValidateVault() || !ValidateLock()) return;
-            var passphrase = keyMode.SelectedIndex == 0 ? password.Password : null;
+            var passphrase = password.Password;
             await RunAsync(async () =>
             {
-                // Save the startup lock before creating the database.
-                await lockEditor.SaveAsync();
                 if (closed) return;
                 if (database is null)
                 {
                     var chosenPath = Path.Combine(location.Text, "workspace.sqlite");
                     if (File.Exists(chosenPath)) throw new IOException(L10n.Get("DatabaseAlreadyExists"));
-                    WorkspaceStore.SaveDatabaseFolder(location.Text);
-                    var opened = await Task.Run(() => WorkspaceStore.Create(passphrase, randomOnly: passphrase is null));
+                    var startupLock = await lockEditor.CreateAsync();
+                    var opened = await Task.Run(() => WorkspaceStore.Create(passphrase, startupLock, chosenPath));
+                    try { WorkspaceStore.SaveDatabaseFolder(location.Text); }
+                    catch { opened.Store.ClearSensitiveData(); opened.Database.Dispose(); throw; }
                     if (closed) { opened.Store.ClearSensitiveData(); opened.Database.Dispose(); return; }
                     ActivateVault(opened.Store, opened.Database);
                 }
+                else await lockEditor.SaveAsync(new AppLockStore(store, database));
                 store.HideDeviceAddress = hideAddresses.IsOn;
                 store.ShowHiddenFiles = hiddenFiles.IsOn;
                 store.ClearCommandAfterSend = clearCommand.IsOn;
@@ -257,11 +247,11 @@ public sealed partial class MainWindow
             GoTo(2);
         }
         local.Click += async (_, _) => await RunAsync(async () =>
-        { WorkspaceStore.SaveDatabaseFolder(location.Text); await PickLocalRestoreAsync(SetError); AfterRestore(); });
+        { await PickLocalRestoreAsync(SetError, Path.Combine(location.Text, "workspace.sqlite")); AfterRestore(); });
         cloud.Click += async (_, _) => await RunAsync(async () =>
         {
             if (await PromptCloudSettingsAsync(null) is { } settings && !closed)
-            { WorkspaceStore.SaveDatabaseFolder(location.Text); await BrowseCloudAsync(settings, lifetime.Token); AfterRestore(); }
+            { await BrowseCloudAsync(settings, lifetime.Token, Path.Combine(location.Text, "workspace.sqlite")); AfterRestore(); }
         });
         void WindowClosed(object sender, WindowEventArgs args)
         { if (!busy) finished.TrySetResult(false); lifetime.Cancel(); }
@@ -284,6 +274,17 @@ public sealed partial class MainWindow
     private static SolidColorBrush Rgb(int rgb) => new(Windows.UI.Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb));
     private static TextBlock SetupText(string text, double size, string color = "ShellTextBrush") => new()
     {
-        Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap, Foreground = WorkspaceTheme.Brush(color)
+        Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Left,
+        HorizontalAlignment = HorizontalAlignment.Left, Foreground = WorkspaceTheme.Brush(color)
     };
+
+    private static StackPanel SetupSection(string title, params UIElement[] controls)
+    {
+        var content = new StackPanel { Spacing = 8 };
+        foreach (var control in controls) content.Children.Add(control);
+        return new StackPanel { Spacing = 6, Children = {
+            SetupText(title, 14), new Border { Padding = new Thickness(10), CornerRadius = new CornerRadius(6),
+                BorderThickness = new Thickness(1), BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"),
+                Background = WorkspaceTheme.Brush("ShellCardBrush"), Child = content } } };
+    }
 }

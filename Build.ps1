@@ -1,6 +1,12 @@
-param([string]$OutputPath = 'Release/Your-Memories-Shell-1.0.0-win-x64', [switch]$IncludePrivateMedia, [switch]$NoRestore)
+﻿param([string]$OutputPath = '', [switch]$IncludePrivateMedia, [switch]$NoRestore)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    $projectInfo = [xml][IO.File]::ReadAllText((Join-Path $projectRoot 'MemoryShell/MemoryShell.csproj'))
+    $version = @($projectInfo.Project.PropertyGroup.Version | Where-Object { $_ })[0]
+    if ($version -notmatch '^[0-9A-Za-z.-]+$') { throw 'Invalid project version.' }
+    $OutputPath = "Release/Your-Memories-Shell-$version-win-x64"
+}
 $destination = [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputPath))
 if (Test-Path -LiteralPath $destination) { throw "目录已存在：$destination" }
 if (Test-Path -LiteralPath "$destination.zip") { throw "压缩包已存在：$destination.zip" }

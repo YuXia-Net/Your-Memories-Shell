@@ -25,15 +25,5 @@ internal sealed record WorkspaceLayout
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return new(); }
     }
 
-    public void Save()
-    {
-        Directory.CreateDirectory(WorkspaceStore.CustomFolder);
-        var temporary = FilePath + ".tmp";
-        try
-        {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(temporary, FilePath, overwrite: true);
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
-    }
+    public void Save() => WorkspaceFile.WriteJson(FilePath, this, new JsonSerializerOptions { WriteIndented = true });
 }

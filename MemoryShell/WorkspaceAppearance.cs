@@ -16,6 +16,8 @@ internal sealed record WorkspaceAppearance
 
     public WorkspaceSkin Skin { get; init; } = WorkspaceSkin.WindowsLight;
     public bool LogoOnLeft { get; init; } = true;
+    public bool TerminalActionsAtTabs { get; init; } = true;
+    public bool TerminalActionsOnLeft { get; init; }
     public string? TerminalFont { get; init; }
     public string? InterfaceFont { get; init; }
     public int? TerminalFontSize { get; init; }
@@ -120,25 +122,7 @@ internal sealed class WorkspaceAppearanceFile
         return settings;
     }
 
-    public void Save()
-    {
-        Directory.CreateDirectory(WorkspaceStore.CustomFolder);
-        var temporary = Path.Combine(WorkspaceStore.CustomFolder, $"appearance-{Guid.NewGuid():N}.tmp");
-        try
-        {
-            using (var file = File.Open(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                JsonSerializer.Serialize(file, this, Options);
-                file.Flush(flushToDisk: true);
-            }
-            File.Move(temporary, SettingsPath, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporary))
-                File.Delete(temporary);
-        }
-    }
+    public void Save() => WorkspaceFile.WriteJson(SettingsPath, this, Options);
 }
 
 internal static class WorkspaceTheme

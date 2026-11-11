@@ -14,8 +14,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Product>你的记忆Shell终端</Product>
-    <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.1.0</Version>
+    <FileVersion>1.1.0.0</FileVersion>
     <ApplicationIcon>Assets\MemoryShell.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
@@ -55,7 +55,7 @@
     <ReadLinesFromFile File="$(MSBuildProjectDirectory)\..\BuildRevision.txt" Condition="Exists('$(MSBuildProjectDirectory)\..\BuildRevision.txt')">
       <Output TaskParameter="Lines" PropertyName="GitRevision" />
     </ReadLinesFromFile>
-    <Exec Condition="Exists('$(MSBuildProjectDirectory)\..\.git')" Command="git rev-parse --short=10 HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true">
+    <Exec Condition="Exists('$(MSBuildProjectDirectory)\..\.git')" Command="git describe --always --abbrev=10 --dirty --exclude=*" ConsoleToMSBuild="true" IgnoreExitCode="true">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitRevision" />
     </Exec>
     <PropertyGroup><GitRevision Condition="'$(GitRevision)' == ''">uncommitted</GitRevision></PropertyGroup>

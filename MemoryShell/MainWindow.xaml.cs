@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
         Root.Language = L10n.Code;
         Metrics.Content = monitorView;
         ProjectLinkHost.Content = ProjectLink();
+        SessionIndicatorsHost.Content = sessionIndicators;
         InitializeWorkspaceShortcuts();
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var scale = Math.Max(96u, GetDpiForWindow(hwnd)) / 96d;
@@ -59,12 +60,14 @@ public sealed partial class MainWindow : Window
     private void Filter_TextChanged(object sender, TextChangedEventArgs e) => RefreshProfiles();
     private void ShowConnections_Click(object sender, RoutedEventArgs e)
     {
+        NavigateWorkspace(WorkspacePage.Sessions);
         SetSidebarVisible(true);
         SetSidebarMode(false);
     }
 
     private void ShowMonitor_Click(object sender, RoutedEventArgs e)
     {
+        NavigateWorkspace(WorkspacePage.Sessions);
         SetSidebarVisible(true);
         SetSidebarMode(true);
     }
@@ -513,7 +516,6 @@ public sealed partial class MainWindow : Window
     private void CloseSessionTab(TabViewItem tab)
     {
         if (ReferenceEquals(tab.Content, Welcome)) tab.Content = null;
-        if (ReferenceEquals(tab, monitorWallTab)) CloseMonitorWall();
         if (ReferenceEquals(tab, memoryTab))
             CloseMemoryTerminal();
         else
@@ -532,10 +534,10 @@ public sealed partial class MainWindow : Window
     private void Sessions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         AttachWelcomePage();
-        monitorWall?.SetActive(ReferenceEquals(Sessions.SelectedItem, monitorWallTab));
         if (Status is null || Metrics is null)
             return;
         var pane = Sessions.SelectedItem is TabViewItem tab ? panes.GetValueOrDefault(tab) : null;
+        RefreshSessionActions();
         UpdateVisibleMonitor();
         Status.Text = ReferenceEquals(Sessions.SelectedItem, memoryTab) && memoryTab is not null ? L10n.Get("SD584CA9D18AE") : pane is null ? L10n.Get("SB073DB9C0BD6") : pane.DisplayStatus;
         RefreshMonitor();
@@ -545,8 +547,9 @@ public sealed partial class MainWindow : Window
 
     private void SetSidebarMode(bool monitor)
     {
-        MonitorMode.IsChecked = monitor;
-        ConnectionsMode.IsChecked = !monitor;
+        SidebarTitle.Text = L10n.Get(monitor ? "SC797A5342DCF" : "SA5574109F020");
+        MonitorMode.IsChecked = monitor && workspacePage == WorkspacePage.Sessions;
+        ConnectionsMode.IsChecked = !monitor && workspacePage == WorkspacePage.Sessions;
         MonitorPanel.Visibility = monitor ? Visibility.Visible : Visibility.Collapsed;
         Profiles.Visibility = ConnectionActions.Visibility =
             monitor ? Visibility.Collapsed : Visibility.Visible;
@@ -567,7 +570,7 @@ public sealed partial class MainWindow : Window
             ToolTipService.SetToolTip(SidebarToggle, label);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SidebarToggle, label);
         }
-        SetSidebarWidth(Root.ActualWidth);
+        SetSidebarWidth(Root.ActualWidth - 56);
         UpdateVisibleMonitor();
         SaveWorkspaceLayout();
     }
@@ -597,7 +600,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateVisibleMonitor()
     {
-        var selected = SidebarPane?.Visibility == Visibility.Visible && MonitorPanel?.Visibility == Visibility.Visible
+        var selected = workspacePage == WorkspacePage.Sessions && SidebarPane?.Visibility == Visibility.Visible && MonitorPanel?.Visibility == Visibility.Visible
             ? Sessions.SelectedItem : null;
         foreach (var (tab, pane) in panes)
             pane.SetMonitoringVisible(ReferenceEquals(tab, selected));

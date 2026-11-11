@@ -21,30 +21,16 @@ internal sealed class WorkspaceStore
     internal static readonly string Folder = Path.Combine(WorkspaceFolder, "data");
     internal static readonly string CustomFolder = Path.Combine(WorkspaceFolder, "Custom");
     private static string DatabaseLocationFile => Path.Combine(CustomFolder, "DatabaseLocation.json");
-    internal static string VaultPath
-    {
-        get
-        {
-            try
-            {
-                if (File.Exists(DatabaseLocationFile) && new FileInfo(DatabaseLocationFile).Length < 4096)
-                {
-                    var folder = JsonSerializer.Deserialize<string>(File.ReadAllText(DatabaseLocationFile));
-                    if (folder is not null && Path.IsPathFullyQualified(folder)) return Path.Combine(folder, "workspace.sqlite");
-                }
-            }
-            catch (Exception ex) when (ex is IOException or JsonException or ArgumentException or UnauthorizedAccessException) { }
-            return Path.Combine(Folder, "workspace.sqlite");
-        }
-    }
+    internal static string VaultPath => WorkspaceFile.ReadDatabasePath(DatabaseLocationFile, Path.Combine(Folder, "workspace.sqlite"));
     internal static void SaveDatabaseFolder(string folder)
     {
         if (!Path.IsPathFullyQualified(folder)) throw new ArgumentException("Invalid database folder.");
         Directory.CreateDirectory(folder);
-        Directory.CreateDirectory(CustomFolder);
-        var stage = DatabaseLocationFile + ".tmp";
-        File.WriteAllText(stage, JsonSerializer.Serialize(Path.GetFullPath(folder)));
-        File.Move(stage, DatabaseLocationFile, true);
+        var resolved = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        if (string.Equals(resolved, Path.TrimEndingDirectorySeparator(Folder), StringComparison.OrdinalIgnoreCase))
+            File.Delete(DatabaseLocationFile);
+        else
+            WorkspaceFile.WriteJson(DatabaseLocationFile, resolved);
     }
 
     public List<SavedConnection> Connections { get; init; } = [];
@@ -61,6 +47,8 @@ internal sealed class WorkspaceStore
     public bool ShowHiddenFiles { get; set; } = true;
     public int DirectoryCacheSeconds { get; set; }
     public CloudSettings? Cloud { get; set; }
+    public AppLockState? StartupLock { get; set; }
+    public int LockSettingsVersion { get; set; }
     public ProbeLayoutPreferences ProbeLayout { get; set; } = new();
     public TerminalAppearance? Appearance { get; set; }
     public List<RdpProfile> RemoteDesktops { get; init; } = [];
@@ -96,25 +84,36 @@ internal sealed class WorkspaceStore
         var database = VaultDatabase.OpenForCurrentUser(VaultPath);
         if (database is null)
             return null;
-        try { return (Read(database), database); }
+        try
+        {
+            var store = Read(database);
+            AppLockStore.ImportLegacy(store, database);
+            return (store, database);
+        }
         catch { database.Dispose(); throw; }
     }
 
-    public static (WorkspaceStore Store, VaultDatabase Database) Unlock(string? passphrase)
+    public static (WorkspaceStore Store, VaultDatabase Database) Unlock(string? passphrase, string? filePath = null)
     {
-        var database = VaultDatabase.Open(VaultPath, passphrase ?? throw new InvalidOperationException(L10n.Get("S7B1696E0F62A")), remember: true);
-        try { return (Read(database), database); }
+        var database = VaultDatabase.Open(filePath ?? VaultPath, passphrase ?? throw new InvalidOperationException(L10n.Get("S7B1696E0F62A")), remember: true);
+        try
+        {
+            var store = Read(database);
+            AppLockStore.ImportLegacy(store, database);
+            return (store, database);
+        }
         catch { database.Dispose(); throw; }
     }
 
-    public static (WorkspaceStore Store, VaultDatabase Database) Create(string? passphrase, bool randomOnly = false)
+    public static (WorkspaceStore Store, VaultDatabase Database) Create(string passphrase, AppLockState? startupLock = null, string? filePath = null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(VaultPath)!);
-        var store = new WorkspaceStore();
+        var destination = filePath ?? VaultPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        var store = new WorkspaceStore { StartupLock = startupLock, LockSettingsVersion = 1 };
         var payload = JsonSerializer.SerializeToUtf8Bytes(store);
         try
         {
-            return (store, VaultDatabase.Create(VaultPath, passphrase, payload, randomOnly));
+            return (store, VaultDatabase.Create(destination, passphrase, payload));
         }
         finally
         {
@@ -138,6 +137,8 @@ internal sealed class WorkspaceStore
                 throw new InvalidDataException(L10n.Get("SB2F53F8F7AD2"));
             if (result.DeviceGroups is null || result.DeviceGroups.Any(string.IsNullOrWhiteSpace))
                 throw new InvalidDataException(L10n.Get("SEDBFFB7A0430"));
+            if (result.LockSettingsVersion is < 0 or > 1) throw new InvalidDataException(L10n.Get("SC0F447D56D15"));
+            AppLockStore.Validate(result.StartupLock);
             return result;
         }
         finally
@@ -172,6 +173,8 @@ internal sealed class WorkspaceStore
         RemotePaths.Clear();
         Transfers.Clear();
         Cloud = null;
+        if (StartupLock is { } startupLock) CryptographicOperations.ZeroMemory(startupLock.Hash);
+        StartupLock = null;
         Appearance = null;
         RemoteDesktops.Clear();
         ProxyPresets.Clear();

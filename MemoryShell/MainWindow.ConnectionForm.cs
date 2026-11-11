@@ -50,6 +50,7 @@ public sealed partial class MainWindow
 
     private void OpenMemoryTerminal()
     {
+        NavigateWorkspace(WorkspacePage.Sessions);
         if (memoryTab is not null)
         {
             Sessions.SelectedItem = memoryTab;

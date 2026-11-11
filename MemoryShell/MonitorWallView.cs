@@ -23,6 +23,7 @@ internal sealed class MonitorWallView : Grid, IDisposable
     private readonly TextBox filter = new() { PlaceholderText = L10n.Get("MonitorFilter"), Width = 200, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly ToggleButton pause = new() { Content = L10n.Get("MonitorPause") };
     private readonly ComboBox interval = new() { Width = 100 };
+    private readonly Button fullScreen = new();
     private readonly SemaphoreSlim wake = new(0, 1);
     private CancellationTokenSource? lifetime;
     private bool active, running, disposed;
@@ -30,6 +31,7 @@ internal sealed class MonitorWallView : Grid, IDisposable
     public event Action<Guid>? ConnectRequested;
     public event Action<Guid>? EditRequested;
     public event Action? FullScreenRequested;
+    public event Action? BackRequested;
 
     public MonitorWallView(Func<SavedConnection[]> connections, Func<SavedHostKey[]> hostKeys, Func<ConnectionProfile, string> displayName,
         Func<ConnectionProfile, string, string> displayText, ProbeLayoutPreferences preferences, Action<ProbeLayoutPreferences> saveLayout)
@@ -40,11 +42,15 @@ internal sealed class MonitorWallView : Grid, IDisposable
         Background = WorkspaceTheme.Brush("ShellBaseBrush");
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition());
-        var heading = new TextBlock { Text = L10n.Get("MonitorWallTitle"), FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+        var heading = new TextBlock { Text = L10n.Get("MonitorWallTitle"), FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+        var back = new Button { Content = new FontIcon { Glyph = "\uE72B", FontSize = 16 }, Width = 36, Height = 36, MinWidth = 0 };
+        ToolTipService.SetToolTip(back, L10n.Get("BackToWorkspace"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, L10n.Get("BackToWorkspace"));
+        back.Click += (_, _) => BackRequested?.Invoke();
         var refresh = new Button { Content = L10n.Get("MonitorRefresh") };
-        var full = new Button { Content = L10n.Get("MonitorFullScreen") };
+        fullScreen.Content = L10n.Get("MonitorFullScreen");
         var controls = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, ItemHeight = 40, ItemWidth = 110, MaximumRowsOrColumns = 8 };
-        controls.Children.Add(pause); controls.Children.Add(refresh); controls.Children.Add(interval); controls.Children.Add(full);
+        controls.Children.Add(pause); controls.Children.Add(refresh); controls.Children.Add(interval); controls.Children.Add(fullScreen);
         VariableSizedWrapGrid.SetColumnSpan(filter, 2); controls.Children.Add(filter);
         var gridButton = new DropDownButton { Content = L10n.Get("ProbeGrid") };
         var presets = new ComboBox { Header = L10n.Get("ProbeGrid"), HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -67,23 +73,28 @@ internal sealed class MonitorWallView : Grid, IDisposable
         interval.SelectedIndex = 0;
         ToolTipService.SetToolTip(interval, L10n.Get("MonitorInterval"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(interval, L10n.Get("MonitorInterval"));
-        var header = new StackPanel { Spacing = 4, Margin = new Thickness(12, 8, 12, 6), Children = { heading, summary, controls } };
+        summary.Foreground = WorkspaceTheme.Brush("ShellMutedBrush");
+        var header = new StackPanel { Spacing = 12, Margin = new Thickness(24, 16, 24, 16), Children = {
+            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { back, heading } }, summary,
+            new Border { Padding = new Thickness(12, 8, 12, 8), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
+                BorderBrush = WorkspaceTheme.Brush("ShellLineBrush"), Background = WorkspaceTheme.Brush("ShellCardBrush"), Child = controls } } };
         Children.Add(header);
         var body = new Grid { Children = { wall, empty } };
         scroll = new ScrollViewer { Content = body, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Enabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(12, 0, 12, 12) };
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(24, 0, 24, 24) };
         SetRow(scroll, 1); Children.Add(scroll);
         scroll.SizeChanged += (_, _) => ArrangeScreens();
         filter.TextChanged += (_, _) => ArrangeScreens();
         interval.SelectionChanged += (_, _) => { seconds = (int)((ComboBoxItem)interval.SelectedItem).Tag; Wake(); };
         pause.Click += (_, _) => { pause.Content = L10n.Get(pause.IsChecked == true ? "MonitorResume" : "MonitorPause"); UpdateRun(); };
         refresh.Click += (_, _) => { foreach (var worker in workers.Values) worker.RetryAt = default; Wake(); };
-        full.Click += (_, _) => FullScreenRequested?.Invoke();
+        fullScreen.Click += (_, _) => FullScreenRequested?.Invoke();
         Reconcile();
     }
 
     public void SetActive(bool value) { active = value; UpdateRun(); }
+    public void SetFullScreen(bool value) => fullScreen.Content = L10n.Get(value ? "ExitProbeFullScreen" : "MonitorFullScreen");
     internal void ApplyLayout(ProbeLayoutPreferences next) { next = next.Normalize(); saveLayout(next); layout = next; ArrangeScreens(); }
     public void RefreshConnections() { Reconcile(); Wake(); }
     private void Wake() { if (!disposed && wake.CurrentCount == 0) wake.Release(); }
@@ -128,8 +139,8 @@ internal sealed class MonitorWallView : Grid, IDisposable
     private void ArrangeScreens()
     {
         var columns = layout.Columns;
-        var cellWidth = Math.Max(144, (Math.Max(0, scroll.ActualWidth - 24) - (columns - 1) * 6) / columns);
-        var cellHeight = Math.Max(144, (Math.Max(0, scroll.ActualHeight - 12) - (layout.Rows - 1) * 6) / layout.Rows);
+        var cellWidth = Math.Max(144, (Math.Max(0, scroll.ActualWidth - 48) - (columns - 1) * 6) / columns);
+        var cellHeight = Math.Max(144, (Math.Max(0, scroll.ActualHeight - 24) - (layout.Rows - 1) * 6) / layout.Rows);
         if (wall.ColumnDefinitions.Count != columns)
         {
             wall.ColumnDefinitions.Clear();

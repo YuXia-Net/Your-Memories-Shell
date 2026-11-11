@@ -125,11 +125,13 @@ internal sealed partial class SessionPane
             return;
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         transferCancellation = operation;
-        BeginTransferDisplay();
         try
         {
+            BeginTransferDisplay();
             await transfer(client, operation.Token);
+            operation.Token.ThrowIfCancellationRequested();
             FinishTransferDisplay(true, L10n.Get("S305EEF7A84A9"));
+            if (!disposed) _ = TransferNotifications.ShowCompletedAsync();
         }
         catch (OperationCanceledException) when (operation.IsCancellationRequested)
         {
@@ -146,6 +148,7 @@ internal sealed partial class SessionPane
         finally
         {
             transferCancellation = null;
+            ActivityChanged?.Invoke();
         }
     }
 

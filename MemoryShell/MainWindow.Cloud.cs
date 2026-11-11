@@ -13,7 +13,7 @@ public sealed partial class MainWindow
     private void StartCloudSchedule()
     {
         cloudTimer?.Stop();
-        if (database?.HasMaster != true || store.Cloud is not { Enabled: true } settings)
+        if (database is null || store.Cloud is not { Enabled: true } settings)
             return;
         if (cloudTimer is null)
         {
@@ -28,7 +28,7 @@ public sealed partial class MainWindow
 
     private void QueueChangedBackup()
     {
-        if (database?.HasMaster == true && store.Cloud is { Enabled: true, Policy: CloudBackupPolicy.OnChange })
+        if (database is not null && store.Cloud is { Enabled: true, Policy: CloudBackupPolicy.OnChange })
             StartCloudSchedule();
     }
 
@@ -73,8 +73,6 @@ public sealed partial class MainWindow
     private async Task UploadBackupAsync(bool manual)
     {
         if (database is not { } active || unlockedLifetime is not { } lifetime || uploadInProgress || restoreInProgress)
-            return;
-        if (!active.HasMaster && (!manual || !await EnsureMasterAsync(active)))
             return;
         if (store.Cloud is not { } settings)
         {
@@ -122,7 +120,7 @@ public sealed partial class MainWindow
 
     private async void BrowseCloud_Click(object sender, RoutedEventArgs e)
     {
-        if (database is null || database.IsRandomOnly)
+        if (database is null)
             return;
         try
         {
@@ -152,7 +150,7 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task BrowseCloudAsync(CloudSettings settings, CancellationToken ct)
+    private async Task BrowseCloudAsync(CloudSettings settings, CancellationToken ct, string? destination = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromMinutes(2));
@@ -184,7 +182,7 @@ public sealed partial class MainWindow
             Status.Text = L10n.Get("S33CE32292C5B");
             await CloudBackup.DownloadAsync(settings, chosen, stage, ct);
             if (!closed && !ct.IsCancellationRequested)
-                await RestoreSnapshotAsync(stage);
+                await RestoreSnapshotAsync(stage, destination);
         }
         finally { TryDelete(stage); }
     }

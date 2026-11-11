@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?><Window x:Class="MemoryShell.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="{local:Localize Key=S1330FC51C5C3}" xmlns:local="using:MemoryShell">
     <Grid x:Name="Root" RequestedTheme="Light" UseLayoutRounding="True" Background="{ThemeResource ShellBaseBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="42" />
+            <RowDefinition Height="48" />
             <RowDefinition Height="*" />
             <RowDefinition Height="24" />
         </Grid.RowDefinitions>
@@ -27,15 +27,15 @@
                     </VisualState.StateTriggers>
                     <VisualState.Setters>
                         <Setter Target="ProductName.Visibility" Value="Collapsed" />
-                        <Setter Target="ToolbarAbout.Visibility" Value="Collapsed" />
+
                         <Setter Target="WelcomePage.Padding" Value="14,20" />
-                        <Setter Target="WelcomeActions.Orientation" Value="Vertical" />
+                        <Setter Target="WelcomeActions.MaximumRowsOrColumns" Value="1" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
-        <Border Background="{ThemeResource ShellToolbarBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="0,0,0,1" Padding="10,0">
+        <Border x:Name="TopBar" Background="{ThemeResource ShellToolbarBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="0,0,0,1" Padding="10,0">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -84,21 +84,33 @@
                             </MenuFlyout>
                         </DropDownButton.Flyout>
                     </DropDownButton>
-                    <Button Style="{StaticResource ShellToolbarButtonStyle}" Click="Settings_Click" Content="{local:Localize Key=SettingsTitle}" />
-                    <Button x:Name="ToolbarAbout" Style="{StaticResource ShellIconButtonStyle}" Click="About_Click" ToolTipService.ToolTip="{local:Localize Key=S52D25A9E30BA}" AutomationProperties.Name="{local:Localize Key=SC33025BAAD42}">
-                        <FontIcon Glyph="" FontSize="14" />
-                    </Button>
+                    <Button Style="{StaticResource ShellToolbarButtonStyle}" Click="QuickConnect_Click" Content="{local:Localize Key=SBEC3D896410B}" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" SizeChanged="Workbench_SizeChanged">
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions><ColumnDefinition x:Name="NavigationColumn" Width="56" /><ColumnDefinition /></Grid.ColumnDefinitions>
+            <Grid x:Name="NavigationRail" Padding="6,10" Background="{ThemeResource ShellToolbarBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="0,0,1,0">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                <StackPanel Spacing="8">
+                    <ToggleButton x:Name="ConnectionsMode" Style="{StaticResource ShellRailToggleStyle}" IsChecked="True" Click="ShowConnections_Click" ToolTipService.ToolTip="{local:Localize Key=SA5574109F020}" AutomationProperties.Name="{local:Localize Key=SA5574109F020}"><FontIcon Glyph="&#xE8B7;" FontSize="19" /></ToggleButton>
+                    <ToggleButton x:Name="MonitorMode" Style="{StaticResource ShellRailToggleStyle}" Click="ShowMonitor_Click" ToolTipService.ToolTip="{local:Localize Key=SC797A5342DCF}" AutomationProperties.Name="{local:Localize Key=SC797A5342DCF}"><FontIcon Glyph="&#xE9D9;" FontSize="19" /></ToggleButton>
+                    <ToggleButton x:Name="ProbeMode" Style="{StaticResource ShellRailToggleStyle}" Click="ShowMonitorWall_Click" ToolTipService.ToolTip="{local:Localize Key=MonitorWallTitle}" AutomationProperties.Name="{local:Localize Key=MonitorWallTitle}"><FontIcon Glyph="&#xE80A;" FontSize="19" /></ToggleButton>
+                </StackPanel>
+                <StackPanel Grid.Row="2" Spacing="8">
+                    <Button Style="{StaticResource ShellRailButtonStyle}" Click="LockVault_Click" ToolTipService.ToolTip="{local:Localize Key=LockWorkspace}" AutomationProperties.Name="{local:Localize Key=LockWorkspace}"><FontIcon Glyph="&#xE72E;" FontSize="18" /></Button>
+                    <ToggleButton x:Name="SettingsMode" Style="{StaticResource ShellRailToggleStyle}" Click="Settings_Click" ToolTipService.ToolTip="{local:Localize Key=SettingsTitle}" AutomationProperties.Name="{local:Localize Key=SettingsTitle}"><FontIcon Glyph="&#xE713;" FontSize="19" /></ToggleButton>
+                    <Button x:Name="ToolbarAbout" Style="{StaticResource ShellRailButtonStyle}" Click="About_Click" ToolTipService.ToolTip="{local:Localize Key=S52D25A9E30BA}" AutomationProperties.Name="{local:Localize Key=SC33025BAAD42}"><FontIcon Glyph="&#xE946;" FontSize="18" /></Button>
+                </StackPanel>
+            </Grid>
+        <Grid x:Name="SessionWorkspace" Grid.Column="1" SizeChanged="Workbench_SizeChanged">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="SidebarColumn" Width="252" />
+                <ColumnDefinition x:Name="SidebarColumn" Width="268" />
                 <ColumnDefinition x:Name="SidebarGripColumn" Width="5" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Border x:Name="SidebarPane" Background="{ThemeResource ShellPaneBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="1" CornerRadius="8" Margin="8,8,0,8">
+            <Border x:Name="SidebarPane" Background="{ThemeResource ShellPaneBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="1" CornerRadius="10" Margin="10,10,0,10">
                 <Grid x:Name="Sidebar" Padding="10,10,10,0" RowSpacing="10" ColumnSpacing="4">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -109,8 +121,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <ToggleButton x:Name="ConnectionsMode" Style="{StaticResource ShellModeButtonStyle}" Content="{local:Localize Key=SA5574109F020}" IsChecked="True" Click="ShowConnections_Click" />
-                    <ToggleButton Grid.Column="1" x:Name="MonitorMode" Style="{StaticResource ShellModeButtonStyle}" Content="{local:Localize Key=SC797A5342DCF}" Click="ShowMonitor_Click" />
+                    <TextBlock x:Name="SidebarTitle" Grid.ColumnSpan="2" Text="{local:Localize Key=SA5574109F020}" FontSize="17" FontWeight="SemiBold" Margin="4,4,0,4" />
                     <Grid Grid.Row="1" Grid.ColumnSpan="2" x:Name="ConnectionActions" ColumnSpacing="4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -142,8 +153,8 @@
                 </Grid>
             </Border>
             <Border x:Name="SidebarGrip" Grid.Column="1" Background="{ThemeResource ShellToolbarBrush}" PointerPressed="SidebarGrip_PointerPressed" PointerMoved="SidebarGrip_PointerMoved" PointerReleased="SidebarGrip_PointerReleased" PointerCaptureLost="SidebarGrip_PointerCaptureLost" DoubleTapped="SidebarGrip_DoubleTapped" ToolTipService.ToolTip="{local:Localize Key=S00484A2C5FEC}" />
-            <Grid Grid.Column="2" Background="{ThemeResource ShellBaseBrush}" Margin="4,8,8,8">
-                <TabView x:Name="Sessions" VerticalAlignment="Stretch" CanReorderTabs="True" CanDragTabs="True" IsAddTabButtonVisible="True" AddTabButtonClick="Sessions_AddTabButtonClick" Background="{ThemeResource ShellToolbarBrush}" TabWidthMode="SizeToContent" TabCloseRequested="Sessions_TabCloseRequested" SelectionChanged="Sessions_SelectionChanged">
+            <Grid Grid.Column="2" Background="{ThemeResource ShellBaseBrush}" Margin="6,10,10,10">
+                <local:SessionTabView x:Name="Sessions" VerticalAlignment="Stretch" CanReorderTabs="True" CanDragTabs="True" IsAddTabButtonVisible="True" AddTabButtonClick="Sessions_AddTabButtonClick" Background="{ThemeResource ShellToolbarBrush}" TabWidthMode="SizeToContent" TabCloseRequested="Sessions_TabCloseRequested" SelectionChanged="Sessions_SelectionChanged">
                     <TabView.TabStripHeader>
                         <Border Margin="4,3,6,3" Padding="0,0,5,0" VerticalAlignment="Bottom" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="0,0,1,0">
                             <StackPanel Orientation="Horizontal" Spacing="2">
@@ -155,19 +166,18 @@
                         </Border>
                     </TabView.TabStripHeader>
                     <TabViewItem x:Name="StartTab" Header="{local:Localize Key=S9C5D341609CD}" IsClosable="True" Tag="start">
-                        <Grid x:Name="Welcome" Background="{ThemeResource ShellBaseBrush}">
+                        <Grid x:Name="Welcome" FlowDirection="LeftToRight" Background="{ThemeResource ShellBaseBrush}">
                             <ScrollViewer x:Name="WelcomePage" Padding="28,24" VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Disabled" HorizontalContentAlignment="Stretch">
                                 <StackPanel MaxWidth="960" Spacing="20" HorizontalAlignment="Stretch">
-                                    <Border Background="{ThemeResource ShellCardBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="1" CornerRadius="12" Padding="22">
-                                    <StackPanel Spacing="12">
-                                        <TextBlock Text="{local:Localize Key=S66AF5915CC75}" FontSize="28" FontWeight="SemiBold" />
-                                        <StackPanel x:Name="WelcomeActions" Orientation="Horizontal" Spacing="8">
-                                            <Button Style="{StaticResource ShellPrimaryButtonStyle}" Content="{local:Localize Key=S94AA4F221201}" Click="NewProfile_Click" />
-                                            <Button Style="{StaticResource ShellToolbarButtonStyle}" Content="{local:Localize Key=SBEC3D896410B}" Click="QuickConnect_Click" />
-                                            <Button Style="{StaticResource ShellToolbarButtonStyle}" Content="{local:Localize Key=SC255841F6809}" Click="RdpMenu_Click" />
-                                        </StackPanel>
+                                    <StackPanel Spacing="6" Margin="2,8,0,4">
+                                        <TextBlock Text="{local:Localize Key=WorkspaceHome}" FontSize="30" FontWeight="SemiBold" />
+                                        <TextBlock Text="{local:Localize Key=S1330FC51C5C3}" Foreground="{ThemeResource ShellMutedBrush}" FontSize="13" />
                                     </StackPanel>
-                                    </Border>
+                                    <VariableSizedWrapGrid x:Name="WelcomeActions" Orientation="Horizontal" ItemWidth="190" ItemHeight="114" MaximumRowsOrColumns="3">
+                                        <Button Style="{StaticResource ShellLaunchCardStyle}" Click="NewProfile_Click" AutomationProperties.Name="{local:Localize Key=S94AA4F221201}"><StackPanel Spacing="14"><FontIcon Glyph="&#xE710;" HorizontalAlignment="Left" Foreground="{ThemeResource ShellAccentBrush}" /><TextBlock Text="{local:Localize Key=S94AA4F221201}" FontWeight="SemiBold" /></StackPanel></Button>
+                                        <Button Style="{StaticResource ShellLaunchCardStyle}" Click="QuickConnect_Click" AutomationProperties.Name="{local:Localize Key=SBEC3D896410B}"><StackPanel Spacing="14"><FontIcon Glyph="&#xE945;" HorizontalAlignment="Left" Foreground="{ThemeResource ShellAccentBrush}" /><TextBlock Text="{local:Localize Key=SBEC3D896410B}" FontWeight="SemiBold" /></StackPanel></Button>
+                                        <Button Style="{StaticResource ShellLaunchCardStyle}" Click="RdpMenu_Click" AutomationProperties.Name="{local:Localize Key=SC255841F6809}"><StackPanel Spacing="14"><FontIcon Glyph="&#xE7F4;" HorizontalAlignment="Left" Foreground="{ThemeResource ShellAccentBrush}" /><TextBlock Text="{local:Localize Key=SC255841F6809}" FontWeight="SemiBold" /></StackPanel></Button>
+                                    </VariableSizedWrapGrid>
                                     <Border Background="{ThemeResource ShellCardBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="1" CornerRadius="12" Padding="18">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnSpacing="12">
@@ -183,33 +193,18 @@
                                         </Border>
                                     </StackPanel>
                                     </Border>
-                                    <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="20,14" Click="ShowMonitorWall_Click">
-                                        <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE9D9;" /><TextBlock Text="{local:Localize Key=MonitorWallTitle}" VerticalAlignment="Center" FontWeight="SemiBold" /></StackPanel>
-                                    </Button>
-                                    <Border Background="{ThemeResource ShellCardBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="1" CornerRadius="12" Padding="20">
-                                    <Grid ColumnSpacing="24">
-                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
-                                        <StackPanel Spacing="6">
-                                            <TextBlock Text="{local:Localize Key=SA5574109F020}" FontSize="13" FontWeight="SemiBold" />
-                                            <HyperlinkButton Content="{local:Localize Key=S117EEFEED30E}" Click="ConnectionManager_Click" Padding="0,3" />
-                                            <HyperlinkButton Content="{local:Localize Key=S3D49D9FCB6D1}" Click="CreateDeviceGroup_Click" Padding="0,3" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Spacing="6">
-                                            <TextBlock Text="{local:Localize Key=SDF3D58C7D84B}" FontSize="13" FontWeight="SemiBold" />
-                                            <HyperlinkButton Content="{local:Localize Key=S64B3BCB55412}" Click="AppearanceSettings_Click" Padding="0,3" />
-                                            <HyperlinkButton Content="{local:Localize Key=SCB957C6CC0EB}" Click="VaultOverview_Click" Padding="0,3" />
-                                        </StackPanel>
-                                    </Grid>
-                                    </Border>
                                 </StackPanel>
                             </ScrollViewer>
                         </Grid>
                     </TabViewItem>
-                </TabView>
+                </local:SessionTabView>
             </Grid>
         </Grid>
+        <ContentControl x:Name="ProbePageHost" Grid.Column="1" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+        <ContentControl x:Name="SettingsPageHost" Grid.Column="1" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+        </Grid>
 
-        <Border Grid.Row="2" Background="{ThemeResource ShellToolbarBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="0,1,0,0" Padding="10,0">
+        <Border x:Name="StatusBar" Grid.Row="2" Background="{ThemeResource ShellToolbarBrush}" BorderBrush="{ThemeResource ShellLineBrush}" BorderThickness="0,1,0,0" Padding="10,0">
             <Grid ColumnSpacing="9">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -217,7 +212,10 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Ellipse Width="6" Height="6" Fill="{ThemeResource ShellAccentBrush}" VerticalAlignment="Center" />
-                <ContentControl x:Name="ProjectLinkHost" Grid.Column="2" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16">
+                    <ContentControl x:Name="SessionIndicatorsHost" VerticalAlignment="Center" />
+                    <ContentControl x:Name="ProjectLinkHost" />
+                </StackPanel>
                 <TextBlock Grid.Column="1" x:Name="Status" Text="{local:Localize Key=SB073DB9C0BD6}" VerticalAlignment="Center" Foreground="{ThemeResource ShellMutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
             </Grid>
         </Border>

@@ -15,7 +15,7 @@ internal sealed partial class SessionPane
         return current with
         {
             TerminalFraction = Math.Clamp(top / Math.Max(.001, top + bottom), .25, .85),
-            LowerCollapsed = lowerPanelCollapsed, LowerTab = Math.Max(0, lower.SelectedIndex), DirectoryTreeVisible = directoryTreeVisible
+            LowerCollapsed = terminalExpanded ? lowerBeforeExpansion : lowerPanelCollapsed, LowerTab = Math.Max(0, lower.SelectedIndex), DirectoryTreeVisible = directoryTreeVisible
         };
     }
 
@@ -30,7 +30,7 @@ internal sealed partial class SessionPane
         saveLayout = save;
     }
 
-    private void SavePanelLayout() => saveLayout?.Invoke(CapturePanelLayout(new()));
+    private void SavePanelLayout() { if (!changingExpansion) saveLayout?.Invoke(CapturePanelLayout(new())); }
 
     internal void ResetPanelLayout()
     {
