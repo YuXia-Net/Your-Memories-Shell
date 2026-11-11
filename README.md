@@ -8,7 +8,7 @@ Windows 原生 SSH 客户端，使用 WinUI 3。无需账号，可在离线或�
 
 解压后运行 `Your-Memories-Shell.exe`。支持 Windows 10 2004 及以上版本和 Windows 11，x64。
 
-首次启动选择语言并设置数据库。连接资料保存在 `Workspace/data`，外观设置保存在 `Workspace/Custom`。更换版本时，关闭程序并保留整个 `Workspace`。
+设置数据库后。数据库存储在 `Workspace/data`，外观设置保存在 `Workspace/Custom`。更换版本时，请务必迁移 `Workspace`文件夹
 
 数据库密码用于查看、导出凭据和恢复备份。启动锁的校验数据保存在加密数据库内，本机自动解密由 Windows 账户保护。数据库位置可在“备份与恢复”中修改。
 
