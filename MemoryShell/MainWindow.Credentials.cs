@@ -42,7 +42,7 @@ public sealed partial class MainWindow
         {
             if (database is not { } active)
                 return;
-            if (store.Connections.Count == 0 && store.RemoteDesktops.Count == 0)
+            if (store.Connections.Count == 0 && store.RemoteDesktops.Count == 0 && store.KeyWallet.Count == 0)
             {
                 Status.Text = L10n.Get("S0CCDB445DAD5");
                 return;

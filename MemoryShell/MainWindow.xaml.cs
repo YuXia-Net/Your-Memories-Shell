@@ -178,6 +178,7 @@ public sealed partial class MainWindow : Window
             }
             catch (Exception ex) { Status.Text = ex.Message; }
         };
+        var wallet = new KeyWalletPicker(store.KeyWallet);
         var secret = new PasswordBox { PasswordRevealMode = PasswordRevealMode.Hidden };
         var remember = new CheckBox
         {
@@ -209,12 +210,13 @@ public sealed partial class MainWindow : Window
         }
         auth.Children.Add(user);
         auth.Children.Add(method);
+        auth.Children.Add(wallet);
         auth.Children.Add(key);
         auth.Children.Add(chooseKey);
         auth.Children.Add(secret);
         auth.Children.Add(remember);
         var proxyEditor = new ProxyEditor(original?.Proxy, store.ProxyPresets, SaveWorkspace, store.HideDeviceAddress);
-        var jumpEditor = new JumpEditor(original?.Jump, hwnd, store.JumpPresets, SaveWorkspace);
+        var jumpEditor = new JumpEditor(original?.Jump, hwnd, store.JumpPresets, SaveWorkspace, store.KeyWallet);
 
         string KeyPath() => key.Text.Trim().Trim('"');
         string HostName()
@@ -226,22 +228,26 @@ public sealed partial class MainWindow : Window
         bool CanReuseSecret()
         {
             var usingKey = method.SelectedIndex == 1;
-            return entry?.Secret is not null && original is not null && hadKey == usingKey &&
+            return wallet.SelectedKey is null && entry?.Secret is not null && original is not null && hadKey == usingKey &&
                 string.Equals(HostName(), original.Host, StringComparison.OrdinalIgnoreCase) &&
                 TryReadPort(out var number) && number == original.Port && user.Text.Trim() == original.Username &&
                 (!usingKey || string.Equals(KeyPath(), original.KeyPath, StringComparison.OrdinalIgnoreCase));
         }
-        void RefreshSecretHint() => secret.PlaceholderText = CanReuseSecret()
+        void RefreshSecretHint() => secret.PlaceholderText = wallet.SelectedKey is { } selectedKey
+            ? string.IsNullOrEmpty(selectedKey.Passphrase) ? L10n.Get("SC156CEF0B568") : L10n.Get("SAADCE4DEC186")
+            : CanReuseSecret()
             ? entry!.Secret!.Length > 0 ? L10n.Get("SAADCE4DEC186") : L10n.Get("S0D49858EE6BC")
             : method.SelectedIndex == 1 ? L10n.Get("SC156CEF0B568") : L10n.Get("S498BC5C77E73");
 
         void RefreshMethod()
         {
             var usingKey = method.SelectedIndex == 1;
-            chooseKey.Visibility = key.Visibility = usingKey ? Visibility.Visible : Visibility.Collapsed;
+            wallet.Visibility = usingKey ? Visibility.Visible : Visibility.Collapsed;
+            chooseKey.Visibility = key.Visibility = usingKey && wallet.SelectedKey is null ? Visibility.Visible : Visibility.Collapsed;
             secret.Header = usingKey ? L10n.Get("S465458FC7FBB") : L10n.Get("SA621AB606DB2");
             RefreshSecretHint();
         }
+        wallet.SelectionChanged += (_, _) => { secret.Password = ""; RefreshMethod(); };
         method.SelectionChanged += (_, _) => RefreshMethod();
         host.TextChanged += (_, _) => RefreshSecretHint();
         port.TextChanged += (_, _) => RefreshSecretHint();
@@ -318,9 +324,10 @@ public sealed partial class MainWindow : Window
 
             var keepCredentials = remember.IsChecked == true;
             var usingKey = method.SelectedIndex == 1;
-            var keyPath = usingKey ? KeyPath() : "";
+            var selectedKey = usingKey ? wallet.SelectedKey : null;
+            var keyPath = usingKey && selectedKey is null ? KeyPath() : "";
             var prepareSession = connectNow || applyToSession is not null;
-            if (usingKey && (prepareSession || keepCredentials) &&
+            if (usingKey && selectedKey is null && (prepareSession || keepCredentials) &&
                 (keyPath.Length == 0 ? entry?.PrivateKey is null : !File.Exists(keyPath)))
             {
                 error.Text = L10n.Get("SB7214DD6470B");
@@ -338,10 +345,10 @@ public sealed partial class MainWindow : Window
                 if (jump?.PrivateKey is { } jumpKey && !ReferenceEquals(jumpKey, original?.Jump?.PrivateKey))
                     importedJumpKey = jumpKey;
                 var reusedKey = usingKey && keyPath.Length == 0;
-                var keyBytes = reusedKey ? entry?.PrivateKey :
+                var keyBytes = selectedKey is not null ? importedKey = selectedKey.PrivateKey.ToArray() : reusedKey ? entry?.PrivateKey :
                     usingKey && keyPath.Length > 0 ? importedKey = WorkspaceStore.ImportPrivateKey(keyPath) : null;
                 suppliedSecret = secret.Password.Length > 0 ? secret.Password :
-                    CanReuseSecret() ? entry!.Secret : usingKey ? null : "";
+                    selectedKey is not null ? selectedKey.Passphrase : CanReuseSecret() ? entry!.Secret : usingKey ? null : "";
 
                 var submitted = new ConnectionProfile
                 {

@@ -64,6 +64,15 @@ internal sealed class ConnectionWorkbook(string?[][] devices, string?[][] keyPar
                 jump?.Host, jump?.Port.ToString(CultureInfo.InvariantCulture), jump?.Username, jump?.Password,
                 AddKey(profile.Name, L10n.Get("SE7988FBD7AAB"), jump?.PrivateKey), null]);
         }
+        foreach (var key in store.KeyWallet)
+        {
+            var row = new string?[19];
+            row[0] = key.Name;
+            row[1] = L10n.Get("KeyWallet");
+            row[6] = key.Passphrase;
+            row[7] = AddKey(key.Name, L10n.Get("KeyWallet"), key.PrivateKey);
+            devices.Add(row);
+        }
         foreach (var profile in store.RemoteDesktops)
         {
             var row = new string?[19];

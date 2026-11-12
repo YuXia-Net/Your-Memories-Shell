@@ -12,6 +12,10 @@ internal sealed record ConnectionEvent(DateTimeOffset Timestamp, string Name, st
 internal sealed record CommandEvent(Guid ProfileId, string Text);
 internal sealed record RemotePathEntry(Guid ProfileId, string Path);
 internal sealed record TransferEntry(Guid ProfileId, DateTimeOffset Timestamp, string Items, string Result, string Detail);
+internal sealed record SavedPrivateKey(Guid Id, string Name, byte[] PrivateKey, string? Passphrase)
+{
+    public override string ToString() => Name;
+}
 internal sealed record SavedJumpPreset(Guid Id, string Name, SshJumpSettings Settings);
 internal sealed record SavedProxyPreset(Guid Id, string Name, SshProxySettings Settings);
 
@@ -33,6 +37,9 @@ internal sealed class WorkspaceStore
             WorkspaceFile.WriteJson(DatabaseLocationFile, resolved);
     }
 
+    public List<SavedPrivateKey> KeyWallet { get; init; } = [];
+    public string? DownloadFolder { get; set; }
+    public bool DownloadFolderMigrated { get; set; }
     public List<SavedConnection> Connections { get; init; } = [];
     public List<string> DeviceGroups { get; init; } = [];
     public List<DeletedConnection> DeletedConnections { get; init; } = [];
@@ -138,6 +145,8 @@ internal sealed class WorkspaceStore
             if (result.DeviceGroups is null || result.DeviceGroups.Any(string.IsNullOrWhiteSpace))
                 throw new InvalidDataException(L10n.Get("SEDBFFB7A0430"));
             if (result.LockSettingsVersion is < 0 or > 1) throw new InvalidDataException(L10n.Get("SC0F447D56D15"));
+            if (result.KeyWallet is null || result.KeyWallet.Any(k => k is null || string.IsNullOrWhiteSpace(k.Name) || k.PrivateKey is not { Length: > 0 }))
+                throw new InvalidDataException(L10n.Get("SBD07EC1746D4"));
             AppLockStore.Validate(result.StartupLock);
             return result;
         }
@@ -163,6 +172,9 @@ internal sealed class WorkspaceStore
             if (saved.Profile.Jump?.PrivateKey is { } jumpKey)
                 CryptographicOperations.ZeroMemory(jumpKey);
         }
+        foreach (var key in KeyWallet) CryptographicOperations.ZeroMemory(key.PrivateKey);
+        KeyWallet.Clear();
+        DownloadFolder = null;
         Connections.Clear();
         DeviceGroups.Clear();
         DeletedConnections.Clear();

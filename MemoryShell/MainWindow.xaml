@@ -100,6 +100,12 @@
                 </StackPanel>
                 <StackPanel Grid.Row="2" Spacing="8">
                     <Button Style="{StaticResource ShellRailButtonStyle}" Click="LockVault_Click" ToolTipService.ToolTip="{local:Localize Key=LockWorkspace}" AutomationProperties.Name="{local:Localize Key=LockWorkspace}"><FontIcon Glyph="&#xE72E;" FontSize="18" /></Button>
+                    <Button x:Name="KeyWalletButton" Style="{StaticResource ShellRailButtonStyle}" Click="KeyWallet_Click" ToolTipService.ToolTip="{local:Localize Key=KeyWallet}" AutomationProperties.Name="{local:Localize Key=KeyWallet}">
+                        <Viewbox Width="22" Height="22"><Canvas Width="24" Height="24">
+                            <Path Data="M3,4 L21,4 Q22,4 22,5 L22,19 Q22,20 21,20 L3,20 Q2,20 2,19 L2,5 Q2,4 3,4 Z M2,8 L22,8" Stroke="{ThemeResource ShellTextBrush}" StrokeThickness="1.5" />
+                            <Path Data="M10,13 A2,2 0 1 1 6,13 A2,2 0 1 1 10,13 M10,13 L18,13 M15,13 L15,16 M18,13 L18,15" Stroke="{ThemeResource ShellTextBrush}" StrokeThickness="1.5" />
+                        </Canvas></Viewbox>
+                    </Button>
                     <ToggleButton x:Name="SettingsMode" Style="{StaticResource ShellRailToggleStyle}" Click="Settings_Click" ToolTipService.ToolTip="{local:Localize Key=SettingsTitle}" AutomationProperties.Name="{local:Localize Key=SettingsTitle}"><FontIcon Glyph="&#xE713;" FontSize="19" /></ToggleButton>
                     <Button x:Name="ToolbarAbout" Style="{StaticResource ShellRailButtonStyle}" Click="About_Click" ToolTipService.ToolTip="{local:Localize Key=S52D25A9E30BA}" AutomationProperties.Name="{local:Localize Key=SC33025BAAD42}"><FontIcon Glyph="&#xE946;" FontSize="18" /></Button>
                 </StackPanel>

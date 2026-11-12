@@ -15,18 +15,41 @@ internal sealed record FilePanelPreferences(
     bool Descending = false,
     bool FoldersFirst = true,
     int RowHeight = 29,
-    string? DownloadFolder = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DownloadFolder = null,
     bool ExplorerStyle = true);
 
 public sealed partial class MainWindow
 {
     private FilePanelPreferences? filePanelPreferences;
-    private FilePanelPreferences FilePreferences => filePanelPreferences ??= ReadFilePreferences();
+    private FilePanelPreferences FilePreferences => (filePanelPreferences ??= ReadFilePreferences()) with { DownloadFolder = store.DownloadFolder };
     private void SaveInitialFileStyle(bool explorer)
     {
         var next = FilePreferences with { ExplorerStyle = explorer };
-        WorkspaceFile.WriteJson(FilePreferencesPath, next, FilePreferencesJson);
-        filePanelPreferences = next;
+        SaveFilePreferences(next);
+    }
+    private void SaveFilePreferences(FilePanelPreferences next)
+    {
+        var previous = store.DownloadFolder;
+        store.DownloadFolder = next.DownloadFolder;
+        try { SaveWorkspace(); }
+        catch { store.DownloadFolder = previous; throw; }
+        WorkspaceFile.WriteJson(FilePreferencesPath, next with { DownloadFolder = null }, FilePreferencesJson);
+        filePanelPreferences = next with { DownloadFolder = null };
+    }
+
+    private static void MigrateDownloadFolder(WorkspaceStore opened, VaultDatabase vault)
+    {
+        var legacy = ReadFilePreferences();
+        if (!opened.DownloadFolderMigrated)
+        {
+            var previous = opened.DownloadFolder;
+            opened.DownloadFolder ??= legacy.DownloadFolder;
+            opened.DownloadFolderMigrated = true;
+            try { opened.Save(vault); }
+            catch { opened.DownloadFolder = previous; opened.DownloadFolderMigrated = false; throw; }
+        }
+        if (legacy.DownloadFolder is not null)
+            WorkspaceFile.WriteJson(FilePreferencesPath, legacy with { DownloadFolder = null }, FilePreferencesJson);
     }
     private static string FilePreferencesPath => Path.Combine(WorkspaceStore.CustomFolder, "FilePanel.json");
     private static readonly JsonSerializerOptions FilePreferencesJson = new()
@@ -100,9 +123,7 @@ public sealed partial class MainWindow
                 var next = new FilePanelPreferences((FileColumnLayout)columns.SelectedIndex, (FileSortOrder)sort.SelectedIndex,
                     order.SelectedIndex == 1, foldersFirst.IsChecked == true, (int)Math.Clamp(height.Value, 24, 52),
                     download.Length == 0 ? null : Path.GetFullPath(download), style.SelectedIndex == 0);
-                WorkspaceFile.WriteJson(FilePreferencesPath, next, FilePreferencesJson);
-
-                filePanelPreferences = next;
+                SaveFilePreferences(next);
                 foreach (var pane in panes.Values)
                     pane.ApplyFilePreferences(next);
                 Status.Text = L10n.Get("S35DF318217F4");

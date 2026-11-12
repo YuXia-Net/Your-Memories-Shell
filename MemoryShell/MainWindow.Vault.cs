@@ -144,6 +144,8 @@ public sealed partial class MainWindow
 
     private void ActivateVault(WorkspaceStore opened, VaultDatabase vault)
     {
+        MigrateDownloadFolder(opened, vault);
+        filePanelPreferences = null;
         store = opened;
         database = vault;
         unlockedLifetime = new CancellationTokenSource();
@@ -290,14 +292,9 @@ public sealed partial class MainWindow
         var revealed = new List<TextBox>();
         void Show(string title, string? value, bool multiline = false)
         {
-            var box = new TextBox
-            {
-                Header = title, Text = value ?? L10n.Get("S6A1BE012C99C"), IsReadOnly = true, AcceptsReturn = multiline,
-                MaxHeight = multiline ? 220 : double.PositiveInfinity
-            };
-            if (multiline)
-                box.FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas");
+            var box = CredentialField.Create(title, value ?? L10n.Get("S6A1BE012C99C"), multiline);
             content.Children.Add(box);
+            if (value is not null) content.Children.Add(CredentialField.Copy(value, multiline));
             revealed.Add(box);
         }
         Show(L10n.Get("SD9068F19FFE4"), selected.Profile.Username);
@@ -323,6 +320,7 @@ public sealed partial class MainWindow
         {
             foreach (var box in revealed)
                 box.Text = "";
+            content.Children.Clear();
         }
     }
 
