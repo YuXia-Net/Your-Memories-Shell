@@ -1118,11 +1118,13 @@
   "KeyCopy": "Copier",
   "KeyDeleteHint": "Supprimer « {0} » ? Les copies enregistrées dans les connexions sont conservées.",
   "KeyInvalid": "Enregistrement impossible. Vérifiez le nom, le format et la phrase secrète.",
-  "KeySource": "Choisir une clé",
-  "KeyFileOrSaved": "Fichier local / clé de la connexion",
+  "KeySource": "Choisir une clé du trousseau",
+  "KeyFileOrSaved": "Aucune sélection",
   "PresetChoose": "Choisir un préréglage",
   "PresetNew": "Enregistrer un nouveau préréglage",
   "PresetUpdateApply": "Mettre à jour et appliquer",
   "PresetApplied": "Enregistré et appliqué à cette connexion.",
-  "PresetHint": "La sélection remplit les champs. Les autres connexions enregistrées ne sont pas modifiées."
+  "PresetHint": "La sélection remplit les champs. Les autres connexions enregistrées ne sont pas modifiées.",
+  "SaveCredentialsToVault": "Enregistrer le mot de passe dans le coffre / la clé dans le trousseau",
+  "KeyLocalPathRequired": "Sans enregistrement, choisissez un fichier de clé local."
 }

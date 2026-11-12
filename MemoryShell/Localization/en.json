@@ -1118,11 +1118,13 @@
   "KeyCopy": "Copy",
   "KeyDeleteHint": "Delete “{0}”? Key copies already saved in connections are not affected.",
   "KeyInvalid": "Cannot save. Check the name, private key format and passphrase.",
-  "KeySource": "Choose key",
-  "KeyFileOrSaved": "Local file / current connection key",
+  "KeySource": "Select a key from the key wallet",
+  "KeyFileOrSaved": "None",
   "PresetChoose": "Choose preset",
   "PresetNew": "Save as new preset",
   "PresetUpdateApply": "Update and apply",
   "PresetApplied": "Saved and applied to this connection.",
-  "PresetHint": "Selecting fills in the fields. Updating a preset leaves other saved connections unchanged."
+  "PresetHint": "Selecting fills in the fields. Updating a preset leaves other saved connections unchanged.",
+  "SaveCredentialsToVault": "Save password to vault / Save key to key wallet",
+  "KeyLocalPathRequired": "Choose a local key file when saving is unchecked."
 }

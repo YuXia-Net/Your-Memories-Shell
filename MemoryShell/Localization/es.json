@@ -1118,11 +1118,13 @@
   "KeyCopy": "Copiar",
   "KeyDeleteHint": "¿Eliminar «{0}»? Se conservan las copias guardadas en las conexiones.",
   "KeyInvalid": "No se puede guardar. Revisa el nombre, el formato y la contraseña.",
-  "KeySource": "Elegir clave",
-  "KeyFileOrSaved": "Archivo local / clave de la conexión",
+  "KeySource": "Elegir una clave del llavero",
+  "KeyFileOrSaved": "Ninguna",
   "PresetChoose": "Elegir preajuste",
   "PresetNew": "Guardar nuevo preajuste",
   "PresetUpdateApply": "Actualizar y aplicar",
   "PresetApplied": "Guardado y aplicado a esta conexión.",
-  "PresetHint": "La selección rellena los campos. Actualizar un preajuste no modifica otras conexiones guardadas."
+  "PresetHint": "La selección rellena los campos. Actualizar un preajuste no modifica otras conexiones guardadas.",
+  "SaveCredentialsToVault": "Guardar contraseña en la bóveda / clave en el llavero",
+  "KeyLocalPathRequired": "Si no guarda la clave, seleccione un archivo de clave local."
 }

@@ -82,7 +82,8 @@ public sealed partial class MainWindow : Window
         if (!openingProfiles.Add(entry.Profile.Id)) return;
         try
         {
-            if (!entry.Profile.RememberCredentials || (entry.Secret is null && entry.PrivateKey is null && string.IsNullOrEmpty(entry.Profile.KeyPath)))
+            if ((!entry.Profile.RememberCredentials && string.IsNullOrEmpty(entry.Profile.KeyPath)) ||
+                (entry.Secret is null && entry.PrivateKey is null && string.IsNullOrEmpty(entry.Profile.KeyPath)))
             {
                 await EditConnectionAsync(entry, false);
                 return;
@@ -162,7 +163,7 @@ public sealed partial class MainWindow : Window
         method.SelectedIndex = hadKey ? 1 : 0;
         var key = new TextBox
         {
-            Header = L10n.Get("S5108BDE065EC"), Text = original?.KeyPath ?? "",
+            Header = L10n.Get("S5108BDE065EC"), Text = entry?.PrivateKey is null ? original?.KeyPath ?? "" : "",
             PlaceholderText = entry?.PrivateKey is null ? L10n.Get("SED5B2AB22F6C") : L10n.Get("SEF7D5375BC4B")
         };
         var chooseKey = new Button { Content = L10n.Get("S38FF0696A230") };
@@ -179,10 +180,11 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { Status.Text = ex.Message; }
         };
         var wallet = new KeyWalletPicker(store.KeyWallet);
+        var keyName = new TextBox { Header = L10n.Get("KeyName"), Text = original?.Name ?? "" };
         var secret = new PasswordBox { PasswordRevealMode = PasswordRevealMode.Hidden };
         var remember = new CheckBox
         {
-            Content = save || entry is not null ? L10n.Get("S73F4FCBCD1A5") : L10n.Get("S7B2A38E7F68C"),
+            Content = L10n.Get("SaveCredentialsToVault"),
             IsChecked = original?.RememberCredentials ?? true
         };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
@@ -215,6 +217,7 @@ public sealed partial class MainWindow : Window
         auth.Children.Add(chooseKey);
         auth.Children.Add(secret);
         auth.Children.Add(remember);
+        auth.Children.Add(keyName);
         var proxyEditor = new ProxyEditor(original?.Proxy, store.ProxyPresets, SaveWorkspace, store.HideDeviceAddress);
         var jumpEditor = new JumpEditor(original?.Jump, hwnd, store.JumpPresets, SaveWorkspace, store.KeyWallet);
 
@@ -231,7 +234,8 @@ public sealed partial class MainWindow : Window
             return wallet.SelectedKey is null && entry?.Secret is not null && original is not null && hadKey == usingKey &&
                 string.Equals(HostName(), original.Host, StringComparison.OrdinalIgnoreCase) &&
                 TryReadPort(out var number) && number == original.Port && user.Text.Trim() == original.Username &&
-                (!usingKey || string.Equals(KeyPath(), original.KeyPath, StringComparison.OrdinalIgnoreCase));
+                (!usingKey || KeyPath().Length == 0 && entry?.PrivateKey is not null ||
+                    string.Equals(KeyPath(), original.KeyPath, StringComparison.OrdinalIgnoreCase));
         }
         void RefreshSecretHint() => secret.PlaceholderText = wallet.SelectedKey is { } selectedKey
             ? string.IsNullOrEmpty(selectedKey.Passphrase) ? L10n.Get("SC156CEF0B568") : L10n.Get("SAADCE4DEC186")
@@ -243,12 +247,16 @@ public sealed partial class MainWindow : Window
         {
             var usingKey = method.SelectedIndex == 1;
             wallet.Visibility = usingKey ? Visibility.Visible : Visibility.Collapsed;
+            wallet.IsEnabled = remember.IsChecked == true;
+            keyName.Visibility = usingKey && remember.IsChecked == true && wallet.SelectedKey is null ? Visibility.Visible : Visibility.Collapsed;
             chooseKey.Visibility = key.Visibility = usingKey && wallet.SelectedKey is null ? Visibility.Visible : Visibility.Collapsed;
             secret.Header = usingKey ? L10n.Get("S465458FC7FBB") : L10n.Get("SA621AB606DB2");
             RefreshSecretHint();
         }
         wallet.SelectionChanged += (_, _) => { secret.Password = ""; RefreshMethod(); };
         method.SelectionChanged += (_, _) => RefreshMethod();
+        remember.Checked += (_, _) => RefreshMethod();
+        remember.Unchecked += (_, _) => { wallet.SelectedIndex = -1; RefreshMethod(); };
         host.TextChanged += (_, _) => RefreshSecretHint();
         port.TextChanged += (_, _) => RefreshSecretHint();
         user.TextChanged += (_, _) => RefreshSecretHint();
@@ -327,7 +335,12 @@ public sealed partial class MainWindow : Window
             var selectedKey = usingKey ? wallet.SelectedKey : null;
             var keyPath = usingKey && selectedKey is null ? KeyPath() : "";
             var prepareSession = connectNow || applyToSession is not null;
-            if (usingKey && selectedKey is null && (prepareSession || keepCredentials) &&
+            if (usingKey && !keepCredentials && keyPath.Length == 0)
+            {
+                error.Text = L10n.Get("KeyLocalPathRequired");
+                return false;
+            }
+            if (usingKey && selectedKey is null &&
                 (keyPath.Length == 0 ? entry?.PrivateKey is null : !File.Exists(keyPath)))
             {
                 error.Text = L10n.Get("SB7214DD6470B");
@@ -338,6 +351,7 @@ public sealed partial class MainWindow : Window
             byte[]? importedJumpKey = null;
             byte[]? persistedKey = null;
             byte[]? persistedJumpKey = null;
+            SavedPrivateKey? addedWalletKey = null;
             try
             {
                 var proxy = proxyEditor.Read();
@@ -345,7 +359,7 @@ public sealed partial class MainWindow : Window
                 if (jump?.PrivateKey is { } jumpKey && !ReferenceEquals(jumpKey, original?.Jump?.PrivateKey))
                     importedJumpKey = jumpKey;
                 var reusedKey = usingKey && keyPath.Length == 0;
-                var keyBytes = selectedKey is not null ? importedKey = selectedKey.PrivateKey.ToArray() : reusedKey ? entry?.PrivateKey :
+                var keyBytes = !keepCredentials ? null : selectedKey is not null ? importedKey = selectedKey.PrivateKey.ToArray() : reusedKey ? entry?.PrivateKey :
                     usingKey && keyPath.Length > 0 ? importedKey = WorkspaceStore.ImportPrivateKey(keyPath) : null;
                 suppliedSecret = secret.Password.Length > 0 ? secret.Password :
                     selectedKey is not null ? selectedKey.Passphrase : CanReuseSecret() ? entry!.Secret : usingKey ? null : "";
@@ -356,6 +370,7 @@ public sealed partial class MainWindow : Window
                     Name = string.IsNullOrWhiteSpace(name.Text) ? original?.Name ?? hostName : name.Text.Trim(),
                     Host = hostName, Port = portNumber, Username = username, Group = groupName,
                     UsesPrivateKey = usingKey, RememberCredentials = keepCredentials, Proxy = proxy, Jump = jump,
+                    KeyPath = usingKey && !keepCredentials ? Path.GetFullPath(keyPath) : "",
                     IncludeInMonitor = includeInMonitor.IsChecked == true, MonitorTags = probeTags.Text.Trim(),
                     MonitorColumnSpan = ReadNumber(probeWidth), MonitorRowSpan = ReadNumber(probeHeight)
                 };
@@ -366,7 +381,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 var index = store.Connections.FindIndex(item => item.Profile.Id == submitted.Id);
-                if (keepCredentials || (save && (applyToSession is null || index >= 0)))
+                if (usingKey || keepCredentials || (save && (applyToSession is null || index >= 0)))
                 {
                     var persisted = keepCredentials ? submitted : submitted with
                     {
@@ -374,6 +389,14 @@ public sealed partial class MainWindow : Window
                         Jump = jump is null ? null : jump with { Password = null, PrivateKey = null }
                     };
                     var saved = new SavedConnection(persisted, keepCredentials ? suppliedSecret : null, keepCredentials ? keyBytes : null);
+                    if (usingKey && keepCredentials && keyBytes is not null && selectedKey is null &&
+                        !store.KeyWallet.Any(k => k.PrivateKey.AsSpan().SequenceEqual(keyBytes) && k.Passphrase == suppliedSecret))
+                    {
+                        var walletName = string.IsNullOrWhiteSpace(keyName.Text) ? submitted.Name : keyName.Text.Trim();
+                        ValidateWalletName(walletName);
+                        addedWalletKey = new SavedPrivateKey(Guid.NewGuid(), walletName, keyBytes.ToArray(), suppliedSecret);
+                        store.KeyWallet.Add(addedWalletKey);
+                    }
                     var previous = index < 0 ? null : store.Connections[index];
                     var previousGroupCount = store.DeviceGroups.Count;
                     RememberDeviceGroup(previous?.Profile.Group ?? "");
@@ -405,6 +428,11 @@ public sealed partial class MainWindow : Window
             }
             catch (Exception ex)
             {
+                if (addedWalletKey is not null)
+                {
+                    store.KeyWallet.Remove(addedWalletKey);
+                    CryptographicOperations.ZeroMemory(addedWalletKey.PrivateKey);
+                }
                 if (sessionKey is not null)
                     CryptographicOperations.ZeroMemory(sessionKey);
                 if (profile?.Jump?.PrivateKey is { } attemptKey)

@@ -1118,11 +1118,13 @@
   "KeyCopy": "复制",
   "KeyDeleteHint": "删除“{0}”？已经保存到连接中的密钥副本不会受影响。",
   "KeyInvalid": "无法保存，请检查名称、私钥格式和口令。",
-  "KeySource": "选择密钥",
-  "KeyFileOrSaved": "本地文件 / 当前连接的密钥",
+  "KeySource": "选择密钥夹内的密钥",
+  "KeyFileOrSaved": "不选择",
   "PresetChoose": "选择预设",
   "PresetNew": "另存为新预设",
   "PresetUpdateApply": "更新并应用",
   "PresetApplied": "已保存并应用到当前连接。",
-  "PresetHint": "选择后立即填入。修改预设不会改变其他已保存的连接。"
+  "PresetHint": "选择后立即填入。修改预设不会改变其他已保存的连接。",
+  "SaveCredentialsToVault": "保存密码到保险库/保存密钥到密钥夹",
+  "KeyLocalPathRequired": "未勾选保存时，请选择本地密钥文件。"
 }

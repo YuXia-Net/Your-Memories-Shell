@@ -1118,11 +1118,13 @@
   "KeyCopy": "Kopieren",
   "KeyDeleteHint": "„{0}“ löschen? In Verbindungen gespeicherte Kopien bleiben erhalten.",
   "KeyInvalid": "Speichern fehlgeschlagen. Prüfen Sie Name, Schlüsselformat und Passphrase.",
-  "KeySource": "Schlüssel wählen",
-  "KeyFileOrSaved": "Lokale Datei / Verbindungsschlüssel",
+  "KeySource": "Schlüssel aus dem Schlüsselbund wählen",
+  "KeyFileOrSaved": "Keine Auswahl",
   "PresetChoose": "Vorlage wählen",
   "PresetNew": "Als neue Vorlage speichern",
   "PresetUpdateApply": "Aktualisieren und anwenden",
   "PresetApplied": "Gespeichert und für diese Verbindung übernommen.",
-  "PresetHint": "Die Auswahl füllt die Felder aus. Andere gespeicherte Verbindungen bleiben bei Änderungen unverändert."
+  "PresetHint": "Die Auswahl füllt die Felder aus. Andere gespeicherte Verbindungen bleiben bei Änderungen unverändert.",
+  "SaveCredentialsToVault": "Passwort im Tresor / Schlüssel im Schlüsselbund speichern",
+  "KeyLocalPathRequired": "Wählen Sie ohne Speicherung eine lokale Schlüsseldatei."
 }

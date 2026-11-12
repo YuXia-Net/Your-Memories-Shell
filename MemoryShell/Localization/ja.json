@@ -1118,11 +1118,13 @@
   "KeyCopy": "コピー",
   "KeyDeleteHint": "「{0}」を削除しますか？接続に保存済みの鍵のコピーは残ります。",
   "KeyInvalid": "保存できません。名前、秘密鍵の形式とパスフレーズを確認してください。",
-  "KeySource": "鍵を選択",
-  "KeyFileOrSaved": "ローカルファイル / 接続に保存した鍵",
+  "KeySource": "鍵フォルダーから鍵を選択",
+  "KeyFileOrSaved": "選択しない",
   "PresetChoose": "プリセットを選択",
   "PresetNew": "新しいプリセットとして保存",
   "PresetUpdateApply": "更新して適用",
   "PresetApplied": "保存し、この接続に適用しました。",
-  "PresetHint": "選択すると入力されます。更新しても他の保存済み接続は変わりません。"
+  "PresetHint": "選択すると入力されます。更新しても他の保存済み接続は変わりません。",
+  "SaveCredentialsToVault": "パスワードを保管庫に保存 / 鍵を鍵フォルダーに保存",
+  "KeyLocalPathRequired": "保存しない場合は、ローカルの鍵ファイルを選択してください。"
 }

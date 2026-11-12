@@ -1118,11 +1118,13 @@
   "KeyCopy": "複製",
   "KeyDeleteHint": "刪除「{0}」？已儲存至連線的金鑰副本不受影響。",
   "KeyInvalid": "無法儲存，請檢查名稱、私鑰格式與密碼。",
-  "KeySource": "選擇金鑰",
-  "KeyFileOrSaved": "本機檔案 / 目前連線的金鑰",
+  "KeySource": "選擇金鑰夾內的金鑰",
+  "KeyFileOrSaved": "不選擇",
   "PresetChoose": "選擇預設",
   "PresetNew": "另存為新預設",
   "PresetUpdateApply": "更新並套用",
   "PresetApplied": "已儲存並套用至目前連線。",
-  "PresetHint": "選擇後立即填入。修改預設不會變更其他已儲存的連線。"
+  "PresetHint": "選擇後立即填入。修改預設不會變更其他已儲存的連線。",
+  "SaveCredentialsToVault": "儲存密碼到保險庫/儲存金鑰到金鑰夾",
+  "KeyLocalPathRequired": "未勾選儲存時，請選擇本機金鑰檔案。"
 }

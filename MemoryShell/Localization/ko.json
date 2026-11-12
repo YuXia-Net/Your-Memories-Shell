@@ -1118,11 +1118,13 @@
   "KeyCopy": "복사",
   "KeyDeleteHint": "“{0}”을 삭제할까요? 연결에 저장된 키 사본은 유지됩니다.",
   "KeyInvalid": "저장할 수 없습니다. 이름, 개인 키 형식과 암호문을 확인하세요.",
-  "KeySource": "키 선택",
-  "KeyFileOrSaved": "로컬 파일 / 현재 연결 키",
+  "KeySource": "키 지갑에서 키 선택",
+  "KeyFileOrSaved": "선택 안 함",
   "PresetChoose": "프리셋 선택",
   "PresetNew": "새 프리셋으로 저장",
   "PresetUpdateApply": "업데이트 및 적용",
   "PresetApplied": "저장하여 현재 연결에 적용했습니다.",
-  "PresetHint": "선택하면 입력됩니다. 프리셋을 변경해도 다른 저장된 연결은 바뀌지 않습니다."
+  "PresetHint": "선택하면 입력됩니다. 프리셋을 변경해도 다른 저장된 연결은 바뀌지 않습니다.",
+  "SaveCredentialsToVault": "비밀번호를 보관함에 저장 / 키를 키 지갑에 저장",
+  "KeyLocalPathRequired": "저장하지 않을 경우 로컬 키 파일을 선택하세요."
 }
