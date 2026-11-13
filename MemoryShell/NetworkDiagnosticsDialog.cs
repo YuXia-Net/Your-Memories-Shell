@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -33,7 +33,7 @@ internal static class NetworkDiagnosticsDialog
         };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { runButton, stopButton } };
         var body = new StackPanel { Spacing = 10, MinWidth = 350, Children = { host, port, buttons, results } };
-        var dialog = new ContentDialog
+        var dialog = new QueuedContentDialog
         {
             XamlRoot = root,
             Title = L10n.Get("SDAA335840030"),

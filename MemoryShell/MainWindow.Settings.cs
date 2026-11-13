@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -9,6 +9,8 @@ public sealed partial class MainWindow
     private bool settingsOpen;
     private Func<bool>? finishSettings;
     private SettingsTabHost? activeSettingsTabs;
+    private WorkspacePage requestedSettingsExit;
+    private bool discardSettingsChanges;
     private async void Settings_Click(object sender, RoutedEventArgs args) => await ShowSettingsAsync();
 
     private async Task ShowSettingsAsync(string? selected = null)
@@ -37,18 +39,45 @@ public sealed partial class MainWindow
                 back, new TextBlock { Text = L10n.Get("SettingsTitle"), FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center }
             } };
             page.Children.Add(heading); Grid.SetRow(tabs, 1); page.Children.Add(tabs);
+            var exitPending = false;
+            var allowExit = false;
+            Action? afterClose = null;
+            async Task ConfirmExitAsync()
+            {
+                exitPending = true;
+                var destination = requestedSettingsExit;
+                try
+                {
+                    var prompt = Dialog(L10n.Get("UnsavedSettings"), L10n.Get("UnsavedSettingsPrompt"), L10n.Get("SaveAllSettings"));
+                    prompt.SecondaryButtonText = L10n.Get("DiscardChanges");
+                    var answer = await prompt.ShowAsync();
+                    if (answer == ContentDialogResult.None) { afterClose = null; return; }
+                    if (answer == ContentDialogResult.Primary) await tabs.SaveChangesAsync();
+                    allowExit = true; NavigateWorkspace(destination);
+                }
+                catch (Exception ex) { afterClose = null; await Dialog(L10n.Get("UnsavedSettings"), ex.Message, "").ShowAsync(); }
+                finally { exitPending = false; }
+            }
             finishSettings = () =>
             {
                 if (tabs.IsSaving && !closed) return false;
+                if (!closed && !discardSettingsChanges && !allowExit && tabs.HasChanges)
+                {
+                    if (!exitPending) _ = ConfirmExitAsync();
+                    return false;
+                }
                 SettingsPageHost.Content = null;
                 finished.TrySetResult(true);
                 return true;
             };
-            Action? afterClose = null;
             Button ActionButton(string key, RoutedEventHandler handler)
             {
                 var button = new Button { Content = L10n.Get(key) };
-                button.Click += (_, _) => { afterClose = () => handler(this, new RoutedEventArgs()); NavigateWorkspace(WorkspacePage.Sessions); };
+                button.Click += (_, _) =>
+                {
+                    if (tabs.IsSaving || exitPending) return;
+                    afterClose = () => handler(this, new RoutedEventArgs()); NavigateWorkspace(WorkspacePage.Sessions);
+                };
                 return button;
             }
             appearancePreview = AddAppearanceSettings(tabs);
@@ -117,6 +146,7 @@ public sealed partial class MainWindow
                 var cloudBody = new StackPanel { Spacing = 14 };
                 CloudSettingsEditor? editor = null;
                 var password = new PasswordBox { Header = L10n.Get("DatabasePassword") };
+                SettingsTabHost.IgnoreChanges(password);
                 cloudPassword = password;
                 var reveal = new Button { Content = L10n.Get("CloudUnlockSettings") };
                 var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = WorkspaceTheme.Brush("ShellErrorBrush") };
@@ -126,8 +156,26 @@ public sealed partial class MainWindow
                     editor = new CloudSettingsEditor(store.Cloud) { MaxHeight = double.PositiveInfinity, MinWidth = 0 };
                     cloudEditor = editor;
                     cloudBody.Children.Clear(); cloudBody.Children.Add(editor);
-                    cloudBody.Children.Add(ActionButton("SA12EBE9CF670", UploadCloud_Click));
-                    cloudBody.Children.Add(ActionButton("S5A6364830EED", BrowseCloud_Click));
+                    Button CloudAction(string label, bool browse)
+                    {
+                        var button = new Button { Content = L10n.Get(label) };
+                        button.Click += async (_, _) =>
+                        {
+                            button.IsEnabled = false;
+                            try
+                            {
+                                UpdateCloudSettings(editor!.Read());
+                                tabs.MarkClean(L10n.Get("S6101C7FAF34F"));
+                                if (browse) await BrowseCloudAsync(store.Cloud!, unlockedLifetime!.Token);
+                                else await UploadBackupAsync(manual: true);
+                            }
+                            catch (Exception ex) { error.Text = ex.Message; }
+                            finally { button.IsEnabled = true; }
+                        };
+                        return button;
+                    }
+                    cloudBody.Children.Add(CloudAction("SA12EBE9CF670", false));
+                    cloudBody.Children.Add(CloudAction("S5A6364830EED", true));
                     var clear = new Button { Content = L10n.Get("S4B19F5A595D0") };
                     clear.Click += (_, _) =>
                     {
@@ -135,6 +183,7 @@ public sealed partial class MainWindow
                         catch (Exception ex) { error.Text = ex.Message; }
                     };
                     cloudBody.Children.Add(clear); cloudBody.Children.Add(error);
+                    tabs.MarkClean(L10n.Get("S6101C7FAF34F"));
                 }
                 if (store.Cloud is null) ShowEditor();
                 else

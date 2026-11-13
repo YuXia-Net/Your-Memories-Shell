@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using MemoryShell.Services;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -12,18 +12,18 @@ public sealed partial class MainWindow
     private bool retryDialogOpen;
     private AppWindowPresenter? windowedSessionPresenter;
 
-    private async Task OpenSessionAsync(ConnectionProfile profile, string? secret, byte[]? privateKey)
+    private async Task OpenSessionAsync(ConnectionProfile profile, string? secret, byte[]? privateKey, bool forceNewTab = false)
     {
         NavigateWorkspace(WorkspacePage.Sessions);
         var state = new ConnectionTab(profile, secret, privateKey);
         if (privateKey is not null)
             CryptographicOperations.ZeroMemory(privateKey);
 
-        var tab = new TabViewItem
-        {
-            Header = DeviceName(profile), Tag = profile.Id,
-            Content = state.ContentHost
-        };
+        var tab = !forceNewTab && Sessions.SelectedItem is TabViewItem empty && !connectionTabs.ContainsKey(empty) && (empty == StartTab || Equals(empty.Tag, "start"))
+            ? empty : new TabViewItem();
+        if (ReferenceEquals(Sessions.SelectedItem, tab)) Sessions.SelectedItem = null;
+        tab.Content = null; tab.Header = DeviceName(profile); tab.Tag = profile.Id; tab.IsClosable = true;
+        tab.Content = state.ContentHost;
         var menu = new MenuFlyout();
         var quick = new MenuFlyoutItem { Text = L10n.Get("SEE7F78AFE268") };
         quick.Click += QuickConnect_Click;
@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         {
             if (connectionTabs.TryGetValue(tab, out var original))
             {
-                try { await OpenSessionAsync(original.Profile, original.Secret, original.PrivateKey?.ToArray()); }
+                try { await OpenSessionAsync(original.Profile, original.Secret, original.PrivateKey?.ToArray(), forceNewTab: true); }
                 catch (Exception ex) { Status.Text = DisplaySessionStatus(profile, ex.Message); }
             }
         };
@@ -68,7 +68,7 @@ public sealed partial class MainWindow
         tab.ContextFlyout = menu;
         connectionTabs.Add(tab, state);
         SetSidebarMode(true);
-        Sessions.TabItems.Add(tab);
+        if (!Sessions.TabItems.Contains(tab)) Sessions.TabItems.Add(tab);
         Sessions.SelectedItem = tab;
         await RunConnectionAsync(tab, state);
     }
@@ -91,14 +91,16 @@ public sealed partial class MainWindow
             return;
 
         state.Running = true;
+        state.ApplyPendingConfiguration();
+        tab.Header = DeviceName(state.Profile);
         SetTabConnectionState(tab, null);
         state.Failure = null;
         state.AutomaticOffered = false;
         try
         {
-            panes.Remove(tab, out var previous);
+            panes.TryGetValue(tab, out var previous);
             var panelLayout = previous?.CapturePanelLayout(workspaceLayout) ?? workspaceLayout;
-            previous?.Dispose();
+            
             var configuration = state.Profile;
             var profile = ConnectionTab.CloneJumpKey(configuration);
             var pane = new SessionPane(hwnd, profile, store, SaveWorkspace, TrustHostAsync, text =>
@@ -113,13 +115,15 @@ public sealed partial class MainWindow
             {
                 SetTabConnectionState(tab, connected);
                 if (connected && state.CredentialUpdate is { } saved)
-                    SaveRetriedCredential(saved, state.Secret);
+                    SaveRetriedCredential(saved, state.Secret, state.WalletCredentialUpdates);
                 state.CredentialUpdate = null;
+                state.WalletCredentialUpdates = [];
                 RecordConnection(profile, connected);
                 if (ReferenceEquals(Sessions.SelectedItem, tab))
                     RefreshMonitor();
             },
                 () => OfferRetryAsync(tab, state, automatic: false), () => EditSessionSettingsAsync(tab, state));
+            if (previous is not null) { pane.KeepTerminalHistory(previous); previous.Dispose(); }
             pane.ApplyPanelLayout(panelLayout, layout =>
             {
                 workspaceLayout = workspaceLayout with
@@ -131,7 +135,7 @@ public sealed partial class MainWindow
             });
             pane.ApplyFilePreferences(FilePreferences);
             pane.ApplyWorkspaceAppearance(workspaceAppearance, workspaceWallpaper);
-            panes.Add(tab, pane);
+            panes[tab] = pane;
             pane.ActivityChanged += RefreshSessionIndicators;
             state.ContentHost.Content = pane;
             RefreshSessionActions();
@@ -147,28 +151,45 @@ public sealed partial class MainWindow
         }
         finally { state.Running = false; SetTabConnectionState(tab, false); }
 
-        await OfferRetryAsync(tab, state);
+        if (state.ReconnectRequested && IsOpen(tab, state))
+        {
+            state.ReconnectRequested = false;
+            await RunConnectionAsync(tab, state);
+        }
+        else await OfferRetryAsync(tab, state);
     }
 
-    private async Task EditSessionSettingsAsync(TabViewItem tab, ConnectionTab state)
+    private async Task EditSessionSettingsAsync(TabViewItem tab, ConnectionTab state, bool reconnectAfterSave = false)
     {
         if (!IsOpen(tab, state) || !await hostDialog.WaitAsync(0))
             return;
+        var reconnect = false;
         try
         {
             var saved = store.Connections.Find(item => item.Profile.Id == state.Profile.Id);
-            var current = new SavedConnection(state.Profile with { Group = saved?.Profile.Group ?? state.Profile.Group },
+            var current = state.PendingConfiguration ?? new SavedConnection(state.Profile with { Group = saved?.Profile.Group ?? state.Profile.Group },
                 state.Secret, state.PrivateKey);
-            await EditConnectionAsync(current, true, applyToSession: updated =>
+            await EditConnectionAsync(current, true, applyToSession: (updated, connect) =>
             {
                 if (!IsOpen(tab, state))
                     return;
-                state.UpdateConfiguration(updated);
+                reconnect = connect || reconnectAfterSave;
+                if (state.Running && !reconnect) state.SetPendingConfiguration(updated);
+                else state.UpdateConfiguration(updated);
                 tab.Header = DeviceName(state.Profile);
                 Status.Text = L10n.Get("S8DC8A2A32D2F");
             });
         }
         finally { hostDialog.Release(); }
+        if (reconnect && IsOpen(tab, state))
+        {
+            if (state.Running)
+            {
+                state.ReconnectRequested = true;
+                if (panes.TryGetValue(tab, out var pane)) pane.Disconnect();
+            }
+            else await RunConnectionAsync(tab, state);
+        }
     }
 
     private void ToggleWindowFullScreen()
@@ -215,6 +236,7 @@ public sealed partial class MainWindow
         ContentDialogResult result;
         string? replacement = null;
         SavedConnection? credentialUpdate = null;
+        Guid[] walletUpdates = [];
         var profile = state.Profile;
         try
         {
@@ -236,14 +258,21 @@ public sealed partial class MainWindow
                 item.Profile.Host == profile.Host && item.Profile.Port == profile.Port &&
                 item.Profile.Username == profile.Username && item.Profile.UsesPrivateKey == profile.UsesPrivateKey) : null;
             var remember = new CheckBox { Content = L10n.Get("S0052B3E121C2"), IsChecked = saved?.Profile.RememberCredentials == true };
+            var walletKeys = state.PrivateKey is null ? [] : store.KeyWallet.Where(k =>
+                k.PrivateKey.AsSpan().SequenceEqual(state.PrivateKey) && k.Passphrase == state.Secret).ToArray();
+            var updateWallet = new CheckBox { Content = L10n.Format("UpdateWalletPassphrase", string.Join(", ", walletKeys.Select(k => k.Name))) };
             if (auth)
             {
                 content.Children.Add(secret);
                 if (saved?.Profile.RememberCredentials == true && profile.RememberCredentials)
+                {
                     content.Children.Add(remember);
+                    if (walletKeys.Length > 0) content.Children.Add(updateWallet);
+                }
             }
 
             var dialog = Dialog(failure.Title, content, edit ? L10n.Get("SA502ED6AF633") : L10n.Get("S68891AB35CAB"));
+            dialog.CanShow = () => IsOpen(tab, state) && ReferenceEquals(Sessions.SelectedItem, tab);
             state.RetryDialog = dialog;
             var operation = dialog.ShowAsync();
             state.AutomaticOffered = true;
@@ -253,7 +282,10 @@ public sealed partial class MainWindow
             {
                 replacement = secret.Password;
                 if (content.Children.Contains(remember) && remember.IsChecked == true)
+                {
                     credentialUpdate = saved;
+                    if (updateWallet.IsChecked == true) walletUpdates = walletKeys.Select(k => k.Id).ToArray();
+                }
             }
             secret.Password = "";
         }
@@ -271,8 +303,7 @@ public sealed partial class MainWindow
         {
             try
             {
-                var saved = store.Connections.Find(item => item.Profile.Id == profile.Id);
-                await EditConnectionAsync(saved ?? new SavedConnection(profile, state.Secret, state.PrivateKey), saved is not null);
+                await EditSessionSettingsAsync(tab, state, reconnectAfterSave: true);
             }
             catch (Exception ex) { Status.Text = DisplaySessionStatus(profile, ex.Message); }
             return;
@@ -282,21 +313,27 @@ public sealed partial class MainWindow
         {
             state.Secret = replacement;
             state.CredentialUpdate = credentialUpdate;
+            state.WalletCredentialUpdates = walletUpdates;
         }
         await RunConnectionAsync(tab, state);
     }
 
-    private void SaveRetriedCredential(SavedConnection entry, string? secret)
+    private void SaveRetriedCredential(SavedConnection entry, string? secret, Guid[]? walletIds = null)
     {
         var index = store.Connections.FindIndex(candidate => ReferenceEquals(candidate, entry));
         if (index < 0)
             return;
 
+        var walletChanges = store.KeyWallet.Select((key, position) => (key, position))
+            .Where(pair => walletIds?.Contains(pair.key.Id) == true && entry.PrivateKey is not null &&
+                pair.key.PrivateKey.AsSpan().SequenceEqual(entry.PrivateKey)).ToArray();
+        foreach (var (key, position) in walletChanges) store.KeyWallet[position] = key with { Passphrase = secret };
         store.Connections[index] = entry with { Secret = secret };
         try { SaveWorkspace(); }
         catch (Exception ex)
         {
             store.Connections[index] = entry;
+            foreach (var (key, position) in walletChanges) store.KeyWallet[position] = key;
             Status.Text = DisplaySessionStatus(entry.Profile, L10n.Format("SAD30CE1C5FB1", ex.Message));
         }
     }
@@ -311,22 +348,42 @@ public sealed partial class MainWindow
         public ConnectionProfile Profile { get; private set; } = CloneJumpKey(profile);
         public string? Secret { get; set; } = secret;
         public SavedConnection? CredentialUpdate { get; set; }
+        public Guid[] WalletCredentialUpdates { get; set; } = [];
+        public SavedConnection? PendingConfiguration { get; private set; }
+        public void SetPendingConfiguration(SavedConnection entry)
+        {
+            ClearPendingConfiguration();
+            PendingConfiguration = entry with { Profile = CloneJumpKey(entry.Profile), PrivateKey = entry.PrivateKey?.ToArray() };
+        }
+        public void ApplyPendingConfiguration()
+        {
+            if (PendingConfiguration is { } pending) UpdateConfiguration(pending);
+        }
+        private void ClearPendingConfiguration()
+        {
+            if (PendingConfiguration?.PrivateKey is { } key) CryptographicOperations.ZeroMemory(key);
+            if (PendingConfiguration?.Profile.Jump?.PrivateKey is { } jumpKey) CryptographicOperations.ZeroMemory(jumpKey);
+            PendingConfiguration = null;
+        }
         public byte[]? PrivateKey { get; private set; } = privateKey?.ToArray();
         public bool Running { get; set; }
+        public bool ReconnectRequested { get; set; }
         public bool AutomaticOffered { get; set; }
         public SshConnectionFailure? Failure { get; set; }
-        public ContentDialog? RetryDialog { get; set; }
+        public QueuedContentDialog? RetryDialog { get; set; }
 
         public void UpdateConfiguration(SavedConnection entry)
         {
             var profile = CloneJumpKey(entry.Profile);
             var privateKey = entry.PrivateKey?.ToArray();
+            ClearPendingConfiguration();
             ClearKeys();
             Profile = profile;
             PrivateKey = privateKey;
             Secret = entry.Secret;
             Failure = null;
             CredentialUpdate = null;
+            WalletCredentialUpdates = [];
         }
 
         internal static ConnectionProfile CloneJumpKey(ConnectionProfile profile)
@@ -341,6 +398,7 @@ public sealed partial class MainWindow
 
         public void Dispose()
         {
+            ClearPendingConfiguration();
             RetryDialog?.Hide();
             Secret = null;
             CredentialUpdate = null;

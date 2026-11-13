@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -137,9 +137,9 @@ internal static class AppLockDialog
         finally { editor.Clear(); }
     }
 
-    private static ContentDialog Create(XamlRoot root, string title, UIElement content, string primary, string close) => new()
+    private static QueuedContentDialog Create(XamlRoot root, string title, UIElement content, string primary, string close) => new()
     {
-        XamlRoot = root, RequestedTheme = (root.Content as FrameworkElement)?.RequestedTheme ?? ElementTheme.Default, Title = title,
+        IsLockDialog = true, XamlRoot = root, RequestedTheme = (root.Content as FrameworkElement)?.RequestedTheme ?? ElementTheme.Default, Title = title,
         Content = content, PrimaryButtonText = primary, CloseButtonText = close, DefaultButton = ContentDialogButton.Primary
     };
 

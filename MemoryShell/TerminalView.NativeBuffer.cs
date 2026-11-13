@@ -147,6 +147,31 @@ internal sealed class TerminalBuffer
     public bool ReverseScreen => reverseScreen;
 
     public Line GetLine(int index) => index < HistoryCount ? history[historyStart + index]! : active.Lines[index - HistoryCount];
+    internal void KeepHistoryFrom(TerminalBuffer previous)
+    {
+        for (var row = previous.historyStart; row < previous.history.Count; row++) Copy(previous.history[row]!);
+        CopyScreen(previous.primary);
+        if (previous.Alternate) CopyScreen(previous.active);
+
+        void CopyScreen(Screen screen)
+        {
+            var count = screen.Lines.Length;
+            while (count > 0 && screen.Lines[count - 1].ReadText().Length == 0) count--;
+            for (var row = 0; row < count; row++) Copy(screen.Lines[row]);
+        }
+        void Copy(Line source)
+        {
+            var copy = new Line(source.CellCount) { Wrapped = source.Wrapped };
+            for (var col = 0; col < source.CellCount; col++)
+            {
+                var cell = source.GetCell(col);
+                var style = previous.GetStyle(cell.StyleId);
+                if (!styleIds.TryGetValue(style, out var id)) { id = styles.Count; styles.Add(style); styleIds.Add(style, id); }
+                copy.Cells[col] = cell with { StyleId = id };
+            }
+            AddHistory(copy);
+        }
+    }
     public Style GetStyle(int id) => styles[id];
     public void ReportFocus(bool focused)
     {

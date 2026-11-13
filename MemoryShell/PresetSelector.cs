@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace MemoryShell;
@@ -10,7 +10,7 @@ internal sealed class PresetSelector<T> : StackPanel where T : class
         Func<Guid, string, T> read, Action<T> apply, Action persist, Guid? selected = null, Func<T, string>? displayName = null)
     {
         Spacing = 8;
-        var picker = new ComboBox { Header = L10n.Get("PresetChoose"), HorizontalAlignment = HorizontalAlignment.Stretch };
+        var picker = new ExplicitComboBox { Header = L10n.Get("PresetChoose"), HorizontalAlignment = HorizontalAlignment.Stretch };
         var label = new TextBox { Header = L10n.Get("S5FE110AA6D1D") };
         var save = new Button();
         var fresh = new Button { Content = L10n.Get("PresetNew") };

@@ -1,4 +1,4 @@
-using MemoryShell.Services;
+﻿using MemoryShell.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Storage;
@@ -35,26 +35,14 @@ internal sealed partial class SessionPane
 
     private async Task UploadItemsAsync(SshSession client, IEnumerable<IStorageItem> items, CancellationToken ct)
     {
-        var transferred = 0;
+        var batch = new FileBatch();
         foreach (var item in items)
         {
             ct.ThrowIfCancellationRequested();
-            switch (item)
-            {
-                case StorageFile file:
-                    await client.UploadAsync(file.Path, RemotePath(directory, file.Name), TransferProgress(L10n.Get("S9E07E3C0532D"), file.Name, new FileInfo(file.Path).Length), ct);
-                    break;
-                case StorageFolder folder:
-                    await client.UploadDirectoryAsync(folder.Path, RemotePath(directory, folder.Name), FolderProgress(L10n.Get("S9E07E3C0532D"), folder.Name), ct);
-                    break;
-                default:
-                    continue;
-            }
-            transferred++;
+            await batch.Run(item.Name, () => UploadBatchItemAsync(client, item.Path, RemotePath(directory, item.Name), batch, ct));
         }
-
         await RefreshFilesAsync(directory);
-        fileStatus.Text = L10n.Format("S7FDC2248D3C6", transferred);
+        FinishBatch(batch);
     }
 
     private Task DownloadResumableAsync()
@@ -83,27 +71,22 @@ internal sealed partial class SessionPane
 
     private Task DownloadAsync()
     {
-        if (SelectedFile is not { IsSymbolicLink: false } entry)
-            return Task.CompletedTask;
-
+        var selected = SelectedFiles;
+        if (selected.Length == 0) return Task.CompletedTask;
         return FileActionAsync(async () =>
         {
-            if (await ChooseSftpDownloadFolderAsync() is not { } target)
-                return;
-            if (entry.Name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || entry.Name.EndsWith('.') || entry.Name.EndsWith(' '))
-                throw new IOException(L10n.Get("S81BE6FAD646E"));
-            var destination = Path.Combine(target, entry.Name);
-            if (!entry.IsDirectory && File.Exists(destination) &&
-                !await ConfirmAsync(L10n.Get("SE4B715A60C85"), L10n.Format("SD426CD37066C", entry.Name), L10n.Get("S4CE4C98EB27E")))
-                return;
-
+            if (await ChooseSftpDownloadFolderAsync() is not { } target) return;
+            if ((File.GetAttributes(target) & System.IO.FileAttributes.ReparsePoint) != 0)
+                throw new IOException(L10n.Get("TransferLinkUnsupported"));
             await TransferAsync(async (client, ct) =>
             {
-                if (entry.IsDirectory)
-                    await client.DownloadDirectoryAsync(entry, destination, FolderProgress(L10n.Get("S4673A2306165"), entry.Name), ct);
-                else
-                    await client.DownloadAsync(entry.FullPath, destination, TransferProgress(L10n.Get("S4673A2306165"), entry.Name, entry.Size), ct);
-                fileStatus.Text = L10n.Format("S9F570D2D8F99", entry.Name);
+                var batch = new FileBatch();
+                foreach (var entry in selected)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await batch.Run(entry.Name, () => DownloadBatchItemAsync(client, entry, Path.Combine(target, entry.Name), batch, ct));
+                }
+                FinishBatch(batch);
             });
         });
     }
@@ -133,7 +116,7 @@ internal sealed partial class SessionPane
             FinishTransferDisplay(true, L10n.Get("S305EEF7A84A9"));
             if (!disposed) _ = TransferNotifications.ShowCompletedAsync();
         }
-        catch (OperationCanceledException) when (operation.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             if (!disposed)
                 fileStatus.Text = cancelled ?? L10n.Get("SE9C7910BBF8D");
@@ -156,13 +139,6 @@ internal sealed partial class SessionPane
     {
         var version = SetTransferItem(action, name, total);
         return CreateTransferReporter<long>(bytes => ShowTransferProgress(version, bytes, total));
-    }
-
-    private IProgress<DirectoryTransferProgress> FolderProgress(string action, string name)
-    {
-        var version = SetTransferItem(action, name, null);
-        return CreateTransferReporter<DirectoryTransferProgress>(progress =>
-            ShowTransferProgress(version, progress.BytesTransferred, null, progress.FilesTransferred));
     }
 
     private IProgress<T> CreateTransferReporter<T>(Action<T> callback)

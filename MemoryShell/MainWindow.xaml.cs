@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using MemoryShell.Services;
@@ -127,10 +127,17 @@ public sealed partial class MainWindow : Window
     }
 
     private async Task EditConnectionAsync(SavedConnection? entry, bool save, string? initialGroup = null,
-        Action<SavedConnection>? applyToSession = null)
+        Action<SavedConnection, bool>? applyToSession = null)
     {
         if (database is null)
             return;
+
+        if (applyToSession is null && entry is not null && Sessions.SelectedItem is TabViewItem activeTab &&
+            connectionTabs.TryGetValue(activeTab, out var active) && !active.Running && active.Profile.Id == entry.Profile.Id)
+        {
+            await EditSessionSettingsAsync(activeTab, active, reconnectAfterSave: !save);
+            return;
+        }
 
         var original = entry?.Profile;
         var name = new TextBox { Header = L10n.Get("SD44E9B3D3B31"), Text = original?.Name ?? "" };
@@ -182,6 +189,7 @@ public sealed partial class MainWindow : Window
         var wallet = new KeyWalletPicker(store.KeyWallet);
         var keyName = new TextBox { Header = L10n.Get("KeyName"), Text = original?.Name ?? "" };
         var secret = new PasswordBox { PasswordRevealMode = PasswordRevealMode.Hidden };
+        var clearSecret = new CheckBox { Content = L10n.Get("ClearSavedSecret") };
         var remember = new CheckBox
         {
             Content = L10n.Get("SaveCredentialsToVault"),
@@ -216,6 +224,7 @@ public sealed partial class MainWindow : Window
         auth.Children.Add(key);
         auth.Children.Add(chooseKey);
         auth.Children.Add(secret);
+        auth.Children.Add(clearSecret);
         auth.Children.Add(remember);
         auth.Children.Add(keyName);
         var proxyEditor = new ProxyEditor(original?.Proxy, store.ProxyPresets, SaveWorkspace, store.HideDeviceAddress);
@@ -231,13 +240,13 @@ public sealed partial class MainWindow : Window
         bool CanReuseSecret()
         {
             var usingKey = method.SelectedIndex == 1;
-            return wallet.SelectedKey is null && entry?.Secret is not null && original is not null && hadKey == usingKey &&
+            return clearSecret.IsChecked != true && wallet.SelectedKey is null && entry?.Secret is not null && original is not null && hadKey == usingKey &&
                 string.Equals(HostName(), original.Host, StringComparison.OrdinalIgnoreCase) &&
                 TryReadPort(out var number) && number == original.Port && user.Text.Trim() == original.Username &&
                 (!usingKey || KeyPath().Length == 0 && entry?.PrivateKey is not null ||
                     string.Equals(KeyPath(), original.KeyPath, StringComparison.OrdinalIgnoreCase));
         }
-        void RefreshSecretHint() => secret.PlaceholderText = wallet.SelectedKey is { } selectedKey
+        void RefreshSecretHint() => secret.PlaceholderText = clearSecret.IsChecked == true ? "" : wallet.SelectedKey is { } selectedKey
             ? string.IsNullOrEmpty(selectedKey.Passphrase) ? L10n.Get("SC156CEF0B568") : L10n.Get("SAADCE4DEC186")
             : CanReuseSecret()
             ? entry!.Secret!.Length > 0 ? L10n.Get("SAADCE4DEC186") : L10n.Get("S0D49858EE6BC")
@@ -255,6 +264,8 @@ public sealed partial class MainWindow : Window
         }
         wallet.SelectionChanged += (_, _) => { secret.Password = ""; RefreshMethod(); };
         method.SelectionChanged += (_, _) => RefreshMethod();
+        clearSecret.Checked += (_, _) => { secret.Password = ""; RefreshSecretHint(); };
+        clearSecret.Unchecked += (_, _) => RefreshSecretHint();
         remember.Checked += (_, _) => RefreshMethod();
         remember.Unchecked += (_, _) => { wallet.SelectedIndex = -1; RefreshMethod(); };
         host.TextChanged += (_, _) => RefreshSecretHint();
@@ -275,7 +286,7 @@ public sealed partial class MainWindow : Window
             } } : null);
         if (applyToSession is not null)
             dialog.PrimaryButtonText = L10n.Get("SC8550237BA70");
-        else if (save)
+        if (save)
             dialog.SecondaryButtonText = L10n.Get("S107FECEDCCBA");
         ConnectionProfile? profile = null;
         string? suppliedSecret = null;
@@ -361,8 +372,10 @@ public sealed partial class MainWindow : Window
                 var reusedKey = usingKey && keyPath.Length == 0;
                 var keyBytes = !keepCredentials ? null : selectedKey is not null ? importedKey = selectedKey.PrivateKey.ToArray() : reusedKey ? entry?.PrivateKey :
                     usingKey && keyPath.Length > 0 ? importedKey = WorkspaceStore.ImportPrivateKey(keyPath) : null;
-                suppliedSecret = secret.Password.Length > 0 ? secret.Password :
+                suppliedSecret = clearSecret.IsChecked == true ? "" : secret.Password.Length > 0 ? secret.Password :
                     selectedKey is not null ? selectedKey.Passphrase : CanReuseSecret() ? entry!.Secret : usingKey ? null : "";
+
+                if (usingKey && keepCredentials && keyBytes is not null) PrivateKeyValidation.Validate(keyBytes, suppliedSecret);
 
                 var submitted = new ConnectionProfile
                 {
@@ -381,14 +394,9 @@ public sealed partial class MainWindow : Window
                 }
 
                 var index = store.Connections.FindIndex(item => item.Profile.Id == submitted.Id);
-                if (usingKey || keepCredentials || (save && (applyToSession is null || index >= 0)))
+                if (usingKey || keepCredentials || save)
                 {
-                    var persisted = keepCredentials ? submitted : submitted with
-                    {
-                        Proxy = proxy is null ? null : proxy with { Password = null },
-                        Jump = jump is null ? null : jump with { Password = null, PrivateKey = null }
-                    };
-                    var saved = new SavedConnection(persisted, keepCredentials ? suppliedSecret : null, keepCredentials ? keyBytes : null);
+                    var saved = new SavedConnection(submitted, keepCredentials ? suppliedSecret : null, keepCredentials ? keyBytes : null);
                     if (usingKey && keepCredentials && keyBytes is not null && selectedKey is null &&
                         !store.KeyWallet.Any(k => k.PrivateKey.AsSpan().SequenceEqual(keyBytes) && k.Passphrase == suppliedSecret))
                     {
@@ -476,7 +484,7 @@ public sealed partial class MainWindow : Window
             try
             {
                 if (applyToSession is not null)
-                    applyToSession(new SavedConnection(profile, suppliedSecret, sessionKey));
+                    applyToSession(new SavedConnection(profile, suppliedSecret, sessionKey), outcome == ContentDialogResult.Secondary || !save);
                 else
                     await OpenSessionAsync(profile, suppliedSecret, sessionKey);
             }
@@ -505,28 +513,30 @@ public sealed partial class MainWindow : Window
                     ct.ThrowIfCancellationRequested();
                     var pinned = store.HostKeys.Find(key =>
                         string.Equals(key.Host, identity.Host, StringComparison.OrdinalIgnoreCase) && key.Port == identity.Port);
-                    if (pinned is not null)
+                    if (pinned is not null && pinned.Fingerprint == identity.Fingerprint && pinned.Algorithm == identity.Algorithm)
                     {
-                        if (pinned.Fingerprint != identity.Fingerprint || pinned.Algorithm != identity.Algorithm)
-                            throw new SshHostKeyException(SshHostKeyFailure.Changed);
                         result.TrySetResult(true);
                         return;
                     }
 
                     var endpoint = store.HideDeviceAddress ? L10n.Get("S607748B52E6E") : $"{identity.Host}:{identity.Port}";
-                    var dialog = Dialog(L10n.Get("SCB42E378E722"),
-                        L10n.Format("S5960AD953E7F", endpoint, identity.Algorithm, identity.Fingerprint), L10n.Get("S52F94743915F"));
-                    using var cancelDialog = ct.Register(() => Root.DispatcherQueue.TryEnqueue(dialog.Hide));
+                    var dialog = Dialog(L10n.Get(pinned is null ? "SCB42E378E722" : "HostKeyChangedTitle"),
+                        pinned is null ? L10n.Format("S5960AD953E7F", endpoint, identity.Algorithm, identity.Fingerprint) :
+                            L10n.Format("HostKeyChangedPrompt", endpoint, pinned.Algorithm, pinned.Fingerprint, identity.Algorithm, identity.Fingerprint),
+                        L10n.Get("S52F94743915F"));
+                    dialog.DefaultButton = ContentDialogButton.Close;
+                    using var cancelDialog = ct.Register(() => Root.DispatcherQueue.TryEnqueue(() => dialog.Hide()));
                     var accepted = await dialog.ShowAsync() == ContentDialogResult.Primary;
                     ct.ThrowIfCancellationRequested();
                     if (accepted)
                     {
                         var key = new SavedHostKey(identity.Host, identity.Port, identity.Algorithm, identity.Fingerprint);
-                        store.HostKeys.Add(key);
+                        var index = pinned is null ? -1 : store.HostKeys.IndexOf(pinned);
+                        if (index < 0) store.HostKeys.Add(key); else store.HostKeys[index] = key;
                         try { SaveWorkspace(); }
                         catch
                         {
-                            store.HostKeys.Remove(key);
+                            if (index < 0) store.HostKeys.Remove(key); else store.HostKeys[index] = pinned!;
                             throw;
                         }
                     }
@@ -538,7 +548,7 @@ public sealed partial class MainWindow : Window
                 }
             }))
                 return false;
-            return await result.Task.WaitAsync(ct).ConfigureAwait(false);
+            return await result.Task.ConfigureAwait(false);
         }
         finally
         {
@@ -650,9 +660,9 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { Status.Text = ex.Message; }
     }
 
-    private ContentDialog Dialog(string title, object content, string primary) => new()
+    private QueuedContentDialog Dialog(string title, object content, string primary) => new()
     {
-        XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = title,
+        CanShow = () => !closed, XamlRoot = Root.XamlRoot, RequestedTheme = Root.RequestedTheme, Title = title,
         FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(workspaceAppearance.InterfaceFont ?? "Segoe UI Variable Text"),
         Content = content is string text ? new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, MaxWidth = 450 } : content,
         PrimaryButtonText = primary, CloseButtonText = L10n.Get("S2CD0F3BE8738"), DefaultButton = ContentDialogButton.Primary

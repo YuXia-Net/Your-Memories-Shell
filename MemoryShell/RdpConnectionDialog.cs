@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -44,7 +44,7 @@ internal static class RdpConnectionDialog
         fields.Children.Add(note);
         fields.Children.Add(error);
 
-        var dialog = new ContentDialog
+        var dialog = new QueuedContentDialog
         {
             XamlRoot = root,
             RequestedTheme = (root.Content as FrameworkElement)?.RequestedTheme ?? ElementTheme.Default,

@@ -1,18 +1,10 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 
 namespace MemoryShell;
 
-internal sealed class KeyWalletPicker : ComboBox
+internal sealed class KeyWalletPicker : ExplicitComboBox
 {
-    protected override void OnPointerWheelChanged(PointerRoutedEventArgs e)
-    {
-        // 收起时让滚轮继续传给页面，不改变密钥选择。
-        if (IsDropDownOpen)
-            base.OnPointerWheelChanged(e);
-    }
-
     public SavedPrivateKey? SelectedKey => (SelectedItem as ComboBoxItem)?.Tag as SavedPrivateKey;
     public KeyWalletPicker(IEnumerable<SavedPrivateKey> keys)
     {

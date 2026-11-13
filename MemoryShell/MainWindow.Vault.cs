@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Xaml;
@@ -13,6 +13,9 @@ public sealed partial class MainWindow
     private bool openingWorkspace;
     private CancellationTokenSource? unlockedLifetime;
     private bool closed;
+    private bool workspaceLocked;
+    private Border? lockCover;
+    private readonly Dictionary<UIElement, Visibility> lockedVisibility = [];
     private long vaultRevision;
 
     private async void StartVault(object sender, RoutedEventArgs e)
@@ -26,7 +29,7 @@ public sealed partial class MainWindow
             vaultLock = WorkspaceStore.Claim();
             ApplyWorkspaceAppearance();
             RestoreWorkspaceLayout();
-            if (!await OpenWorkspaceAsync() && !closed)
+            if (!await OpenWorkspaceWithRecoveryAsync() && !closed)
                 Close();
         }
         catch (Exception ex)
@@ -86,6 +89,41 @@ public sealed partial class MainWindow
             if (closed)
                 ReleaseWorkspaceClaim();
         }
+    }
+
+    private async Task<bool> OpenWorkspaceWithRecoveryAsync()
+    {
+        while (!closed)
+        {
+            try { return await OpenWorkspaceAsync(); }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or SqliteException)
+            {
+                var restore = new Button { Content = L10n.Get("S5EDCDCAC3347") };
+                var content = new StackPanel { Spacing = 12, Children = {
+                    new TextBlock { Text = ex.Message, TextWrapping = TextWrapping.Wrap, MaxWidth = 480 }, restore } };
+                var dialog = Dialog(L10n.Get("DatabaseUnavailableTitle"), content, L10n.Get("ChooseDatabase"));
+                dialog.SecondaryButtonText = L10n.Get("RetryAction");
+                var restoring = false;
+                restore.Click += (_, _) => { restoring = true; dialog.Hide(); };
+                var result = await dialog.ShowAsync();
+                if (restoring)
+                {
+                    var folder = new FolderPicker(); folder.FileTypeFilter.Add("*");
+                    WinRT.Interop.InitializeWithWindow.Initialize(folder, hwnd);
+                    if (await folder.PickSingleFolderAsync() is { } destination)
+                        await PickLocalRestoreAsync(destination: Path.Combine(destination.Path, "workspace.sqlite"));
+                    if (database is not null) return true;
+                }
+                else if (result == ContentDialogResult.Primary)
+                {
+                    var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".sqlite"); picker.FileTypeFilter.Add(".sqlite3");
+                    WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+                    if (await picker.PickSingleFileAsync() is { } file) WorkspaceStore.SelectDatabaseFile(file.Path);
+                }
+                else if (result != ContentDialogResult.Secondary) return false;
+            }
+        }
+        return false;
     }
 
     private async Task<bool> PromptUnlockAsync()
@@ -159,7 +197,8 @@ public sealed partial class MainWindow
 
     private void ClearUnlockedWorkspace()
     {
-        finishSettings?.Invoke();
+        discardSettingsChanges = true;
+        try { finishSettings?.Invoke(); } finally { discardSettingsChanges = false; }
         if (!closed) NavigateWorkspace(WorkspacePage.Sessions);
         CloseMonitorWall();
         cloudTimer?.Stop();
@@ -198,6 +237,7 @@ public sealed partial class MainWindow
     private void CloseVault()
     {
         closed = true;
+        QueuedContentDialog.SetLocked(false);
         TransferNotifications.Close();
         try { ClearUnlockedWorkspace(); }
         finally
@@ -224,11 +264,41 @@ public sealed partial class MainWindow
                 Status.Text = L10n.Get("SD893992DB932");
                 return;
             }
-            ClearUnlockedWorkspace();
-            if (!await OpenWorkspaceAsync() && !closed)
-                Close();
+            await LockWorkspaceAsync();
         }
         catch (Exception ex) { Status.Text = ex.Message; }
+    }
+
+    private async Task LockWorkspaceAsync()
+    {
+        if (database is not { } active) return;
+        workspaceLocked = true;
+        QueuedContentDialog.SetLocked(true);
+        if (lockCover is null)
+        {
+            var unlock = new Button { Content = L10n.Get("UnlockWorkspace"), HorizontalAlignment = HorizontalAlignment.Center };
+            unlock.Click += async (_, _) => { unlock.IsEnabled = false; try { await LockWorkspaceAsync(); } finally { unlock.IsEnabled = true; } };
+            lockCover = new Border { Background = WorkspaceTheme.Brush("ShellBaseBrush"), Child = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Spacing = 20,
+                Children = { new FontIcon { Glyph = "\uE72E", FontSize = 40 }, new TextBlock { Text = L10n.Get("WorkspaceLocked"), FontSize = 24 }, unlock }
+            } };
+            Grid.SetRowSpan(lockCover, 3); Root.Children.Add(lockCover);
+        }
+        lockCover.Visibility = Visibility.Visible;
+        foreach (var child in Root.Children.Where(child => !ReferenceEquals(child, lockCover)))
+        {
+            if (!lockedVisibility.ContainsKey(child)) lockedVisibility[child] = child.Visibility;
+            child.Visibility = Visibility.Collapsed;
+        }
+        if (await AppLockDialog.RequireAsync(Root.XamlRoot, new AppLockStore(store, active)) && !closed)
+        {
+            lockCover.Visibility = Visibility.Collapsed;
+            foreach (var (child, visibility) in lockedVisibility) child.Visibility = visibility;
+            lockedVisibility.Clear();
+            workspaceLocked = false;
+            QueuedContentDialog.SetLocked(false);
+        }
     }
 
     private void RecordConnection(Services.ConnectionProfile profile, bool connected)

@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -10,7 +10,7 @@ public sealed partial class MainWindow
     private TabViewItem? memoryTab;
     private MemoryTerminalView? memoryTerminal;
 
-    private ContentDialog ConnectionDialog(string title, bool save, TextBlock error,
+    private QueuedContentDialog ConnectionDialog(string title, bool save, TextBlock error,
         StackPanel device, StackPanel auth, ProxyEditor proxy, JumpEditor jump, StackPanel? probe = null)
     {
         var width = Math.Clamp(Root.ActualWidth - 48, 380, 940);

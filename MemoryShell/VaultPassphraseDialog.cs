@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace MemoryShell;
@@ -18,7 +18,7 @@ internal static class VaultPassphraseDialog
         };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var fields = new StackPanel { Spacing = 9, MinWidth = 340, Children = { current, replacement, confirmation, hint, error } };
-        var dialog = new ContentDialog
+        var dialog = new QueuedContentDialog
         {
             XamlRoot = root,
             RequestedTheme = (root.Content as FrameworkElement)?.RequestedTheme ?? ElementTheme.Default,

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using MemoryShell.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -16,6 +16,7 @@ internal sealed class JumpEditor : StackPanel
     private readonly TextBox user = new() { Header = L10n.Get("S01B6FCF6A966") };
     private readonly CheckBox useKey = new() { Content = L10n.Get("S1F6B392A4ED6") };
     private readonly TextBox path = new() { Header = L10n.Get("S6DBAA3B83FC4") };
+    private readonly CheckBox clearSecret = new() { Content = L10n.Get("ClearSavedSecret") };
     private readonly PasswordBox password = new() { PasswordRevealMode = PasswordRevealMode.Hidden };
 
     public bool IsRouteEnabled => enabled.IsChecked == true;
@@ -54,7 +55,7 @@ internal sealed class JumpEditor : StackPanel
         Grid.SetColumn(port, 1);
         endpoint.Children.Add(host);
         endpoint.Children.Add(port);
-        var fields = new StackPanel { Spacing = 8, Children = { endpoint, user, useKey, wallet, path, select, password, error } };
+        var fields = new StackPanel { Spacing = 8, Children = { endpoint, user, useKey, wallet, path, select, password, clearSecret, error } };
         Children.Add(fields);
         var match = original is null ? null : presets.FirstOrDefault(x =>
             x.Settings.Host == original.Host && x.Settings.Port == original.Port && x.Settings.Username == original.Username &&
@@ -83,6 +84,8 @@ internal sealed class JumpEditor : StackPanel
             password.PlaceholderText = !string.IsNullOrEmpty(FindSavedPassword(NormalizeHost(host.Text), ReadPort(), user.Text.Trim(), KeyPath))
                 ? L10n.Get("SAADCE4DEC186") : "";
         }
+        clearSecret.Checked += (_, _) => { password.Password = ""; Update(); };
+        clearSecret.Unchecked += (_, _) => Update();
         wallet.SelectionChanged += (_, _) => { password.Password = ""; Update(); };
         enabled.Checked += (_, _) => Update();
         enabled.Unchecked += (_, _) => Update();
@@ -122,10 +125,16 @@ internal sealed class JumpEditor : StackPanel
                 key = WorkspaceStore.ImportPrivateKey(privateKeyPath);
         }
 
+        var passphrase = clearSecret.IsChecked == true ? "" : password.Password.Length > 0 ? password.Password : FindSavedPassword(address, number, username, privateKeyPath);
+        if (key is not null)
+        {
+            try { PrivateKeyValidation.Validate(key, passphrase); }
+            catch { System.Security.Cryptography.CryptographicOperations.ZeroMemory(key); throw; }
+        }
         return new SshJumpSettings
         {
             Host = address, Port = number, Username = username, PrivateKey = key, UsesPrivateKey = useKey.IsChecked == true,
-            Password = password.Password.Length > 0 ? password.Password : FindSavedPassword(address, number, username, privateKeyPath)
+            Password = passphrase
         };
     }
 
@@ -135,6 +144,7 @@ internal sealed class JumpEditor : StackPanel
 
     private string? FindSavedPassword(string address, int number, string username, string keyPath)
     {
+        if (clearSecret.IsChecked == true) return null;
         var usingKey = useKey.IsChecked == true;
         if (usingKey && wallet.SelectedKey is { } selected) return selected.Passphrase;
         if (original is null || !string.Equals(original.Host, address, StringComparison.OrdinalIgnoreCase) ||

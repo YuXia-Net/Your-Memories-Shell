@@ -167,7 +167,7 @@ public sealed partial class SshSession
             throw new IOException(L10n.Format("S108A1FAB6571", item.Name));
     }
 
-    private static void ValidateLocalName(string name)
+    internal static void ValidateLocalName(string name)
     {
         var stem = name.Split('.', 2)[0].TrimEnd(' ').ToUpperInvariant();
         var deviceNumber = stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) ||

@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace MemoryShell;
@@ -12,7 +12,9 @@ public sealed partial class MainWindow
 
     private void NavigateWorkspace(WorkspacePage page)
     {
+        if (workspaceLocked) return;
         if (page != WorkspacePage.Probe && probeFullScreen) ToggleProbeFullScreen();
+        if (page != WorkspacePage.Settings) requestedSettingsExit = page;
         if (page != WorkspacePage.Settings && finishSettings?.Invoke() == false) return;
         workspacePage = page;
         SessionWorkspace.Visibility = page == WorkspacePage.Sessions ? Visibility.Visible : Visibility.Collapsed;

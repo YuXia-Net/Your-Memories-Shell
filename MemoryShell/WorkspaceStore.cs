@@ -26,6 +26,7 @@ internal sealed class WorkspaceStore
     internal static readonly string CustomFolder = Path.Combine(WorkspaceFolder, "Custom");
     private static string DatabaseLocationFile => Path.Combine(CustomFolder, "DatabaseLocation.json");
     internal static string VaultPath => WorkspaceFile.ReadDatabasePath(DatabaseLocationFile, Path.Combine(Folder, "workspace.sqlite"));
+    internal static void SelectDatabaseFile(string path) => WorkspaceFile.WriteJson(DatabaseLocationFile, Path.GetFullPath(path));
     internal static void SaveDatabaseFolder(string folder)
     {
         if (!Path.IsPathFullyQualified(folder)) throw new ArgumentException("Invalid database folder.");

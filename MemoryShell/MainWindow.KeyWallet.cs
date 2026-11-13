@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Renci.SshNet;
 using Windows.Storage.Pickers;
 
 namespace MemoryShell;
@@ -136,12 +135,11 @@ public sealed partial class MainWindow
                 ValidateWalletName(name.Text);
                 bytes = Encoding.UTF8.GetBytes(key.Text.Replace("\r\n", "\n").Replace('\r', '\n'));
                 if (bytes.Length is 0 or > 1024 * 1024) throw new ArgumentException(L10n.Get("SC1AA9DD1DF4B"));
-                using var stream = new MemoryStream(bytes, writable: false);
-                using var parsed = string.IsNullOrEmpty(password.Password) ? new PrivateKeyFile(stream) : new PrivateKeyFile(stream, password.Password);
+                PrivateKeyValidation.Validate(bytes, password.Password);
                 CommitWalletKey(null, new SavedPrivateKey(Guid.NewGuid(), name.Text.Trim(), bytes, password.Password));
                 bytes = null;
             }
-            catch (Exception ex) { args.Cancel = true; error.Text = L10n.Get("KeyInvalid") + " " + ex.Message; }
+            catch (Exception ex) { args.Cancel = true; error.Text = ex.Message; }
             finally { if (bytes is not null) CryptographicOperations.ZeroMemory(bytes); }
         };
         try { await dialog.ShowAsync(); } finally { key.Text = password.Password = ""; }

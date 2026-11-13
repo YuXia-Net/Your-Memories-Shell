@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -254,12 +254,12 @@ public sealed partial class MainWindow
         loadPreset.Click += (_, _) =>
         {
             if (chooser.SelectedItem is string name && presets.TryGetValue(name, out var selected))
-                Fill(selected);
+                { Fill(selected); tabs.MarkChanged(ApplyAppearanceAsync); }
         };
         deletePreset.Click += (_, _) =>
         {
             if (chooser.SelectedItem is string name && presets.Remove(name))
-                RefreshPresets();
+            { RefreshPresets(); tabs.MarkChanged(ApplyAppearanceAsync); }
         };
         reset.Click += (_, _) => Fill(WorkspaceAppearance.Default with
         {
@@ -276,6 +276,7 @@ public sealed partial class MainWindow
                 if (await picker.PickSingleFileAsync() is { } file)
                 {
                     stagedWallpaper = file;
+                    tabs.MarkChanged(ApplyAppearanceAsync);
                     wallpaperLabel.Text = file.Name;
                     previewImage = await ReadWallpaperAsync(file);
                     UpdatePreview();
@@ -287,6 +288,7 @@ public sealed partial class MainWindow
         {
             stagedWallpaper = null;
             wallpaper = null;
+            tabs.MarkChanged(ApplyAppearanceAsync);
             wallpaperLabel.Text = L10n.Get("SAD625FD2ED94");
             previewImage = null;
             UpdatePreview();

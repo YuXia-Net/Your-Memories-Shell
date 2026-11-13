@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using MemoryShell.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -96,7 +96,7 @@ internal sealed class MonitorWallView : Grid, IDisposable
     public void SetActive(bool value) { active = value; UpdateRun(); }
     public void SetFullScreen(bool value) => fullScreen.Content = L10n.Get(value ? "ExitProbeFullScreen" : "MonitorFullScreen");
     internal void ApplyLayout(ProbeLayoutPreferences next) { next = next.Normalize(); saveLayout(next); layout = next; ArrangeScreens(); }
-    public void RefreshConnections() { Reconcile(); Wake(); }
+    public void RefreshConnections() { Reconcile(); foreach (var worker in workers.Values) if (worker.RetryAt == DateTimeOffset.MaxValue) worker.RetryAt = default; Wake(); }
     private void Wake() { if (!disposed && wake.CurrentCount == 0) wake.Release(); }
 
     private void UpdateRun()
@@ -223,7 +223,7 @@ internal sealed class MonitorWallView : Grid, IDisposable
         timeout.CancelAfter(TimeSpan.FromSeconds(25));
         try
         {
-            if (!saved.Profile.RememberCredentials || (saved.Secret is null && saved.PrivateKey is null && string.IsNullOrEmpty(saved.Profile.KeyPath)))
+            if ((!saved.Profile.RememberCredentials && string.IsNullOrEmpty(saved.Profile.KeyPath)) || (saved.Secret is null && saved.PrivateKey is null && string.IsNullOrEmpty(saved.Profile.KeyPath)))
                 throw new InvalidOperationException(L10n.Get("MonitorNeedsCredentials"));
             if (!trusted.Any(key => key.Host.Equals(saved.Profile.Host, StringComparison.OrdinalIgnoreCase) && key.Port == saved.Profile.Port) ||
                 (saved.Profile.Jump is { } route && !trusted.Any(key => key.Host.Equals(route.Host, StringComparison.OrdinalIgnoreCase) && key.Port == route.Port)))

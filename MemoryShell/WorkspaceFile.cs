@@ -46,14 +46,18 @@ internal static class WorkspaceFile
                 if (stream.Length is <= 0 or > 4096) throw new InvalidDataException();
                 var folder = JsonSerializer.Deserialize<string>(stream);
                 if (folder is null || !Path.IsPathFullyQualified(folder)) throw new InvalidDataException();
-                var database = Path.Combine(Path.GetFullPath(folder), "workspace.sqlite");
+                var resolved = Path.GetFullPath(folder);
+                var database = File.Exists(resolved) || !Directory.Exists(resolved) && Path.GetExtension(resolved).ToLowerInvariant() is ".sqlite" or ".sqlite3"
+                    ? resolved : Path.Combine(resolved, "workspace.sqlite");
                 if ((File.GetAttributes(database) & FileAttributes.Directory) != 0) throw new InvalidDataException();
                 return database;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
             {
-                throw new InvalidDataException(L10n.Format("DatabaseLocationUnavailable", configuration), ex);
+                throw new DatabaseLocationException(L10n.Format("DatabaseLocationUnavailable", configuration), ex);
             }
         }
     }
 }
+
+internal sealed class DatabaseLocationException(string message, Exception inner) : IOException(message, inner);

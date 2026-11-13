@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -63,7 +63,7 @@ internal static class MultiLocationDiagnosticsDialog
                 instructions, host, port, new ScrollViewer { Content = choices, MaxHeight = 150 }, buttons, results
             }
         };
-        var dialog = new ContentDialog
+        var dialog = new QueuedContentDialog
         {
             XamlRoot = root, Title = L10n.Get("S68BDF6B92DF0"), RequestedTheme = (root.Content as FrameworkElement)?.RequestedTheme ?? ElementTheme.Default,
             Content = new ScrollViewer { Content = body, MaxHeight = 510 }, CloseButtonText = L10n.Get("S3FD47EDCE45B")

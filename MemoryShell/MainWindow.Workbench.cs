@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Windows.System;
@@ -54,7 +54,7 @@ public sealed partial class MainWindow
     private void AttachWelcomePage()
     {
         if (Welcome is null || Sessions.SelectedItem is not TabViewItem selected ||
-            (selected != StartTab && !Equals(selected.Tag, "start"))) return;
+            (connectionTabs.ContainsKey(selected) || selected != StartTab && !Equals(selected.Tag, "start"))) return;
         if (ReferenceEquals(selected.Content, Welcome)) return;
         if (Welcome.Parent is TabViewItem parent) parent.Content = null;
         foreach (var item in Sessions.TabItems.OfType<TabViewItem>())
@@ -75,7 +75,7 @@ public sealed partial class MainWindow
             var accelerator = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
             accelerator.Invoked += (_, args) =>
             {
-                if (database is null || openingWorkspace) return;
+                if (database is null || openingWorkspace || workspaceLocked) return;
                 action();
                 args.Handled = true;
             };

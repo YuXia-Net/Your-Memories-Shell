@@ -1,4 +1,4 @@
-using MemoryShell.Services;
+﻿using MemoryShell.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -28,7 +28,7 @@ internal sealed partial class SessionPane : Grid, IDisposable
     private readonly TextBox path = new() { PlaceholderText = L10n.Get("S1CFA6840570C") };
     private readonly TextBox fileFilter = new() { PlaceholderText = L10n.Get("S43D3DF4FE719"), Width = 190, MinWidth = 0, Margin = new Thickness(0, 0, 12, 0) };
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? fileFilterTimer;
-    private readonly ListView files = new() { SelectionMode = ListViewSelectionMode.Single };
+    private readonly ListView files = new() { SelectionMode = ListViewSelectionMode.Extended };
     private readonly List<string> history = [];
     private readonly ListView forwards = new();
     private readonly Dictionary<ListViewItem, (ForwardKind Kind, int Port)> forwardingRows = [];
@@ -57,6 +57,11 @@ internal sealed partial class SessionPane : Grid, IDisposable
 
     public string StatusText { get; private set; } = L10n.Get("S8BE0EA36A9BB");
     internal ConnectionProfile Profile => profile;
+    internal void KeepTerminalHistory(SessionPane previous)
+    {
+        terminal.KeepHistoryFrom(previous.terminal);
+        terminal.Write("\r\n── " + L10n.Get("ReconnectingHere") + " ──\r\n");
+    }
     internal bool IsConnected => session is not null && !disconnectRequested && !disposed;
     internal bool IsTransferring => transferCancellation is not null && !disposed;
     internal event Action? ActivityChanged;
@@ -328,17 +333,18 @@ internal sealed partial class SessionPane : Grid, IDisposable
         AddFileAction(L10n.Get("S2F9DAA828907"), DeleteAsync);
         fileMenu.Opening += (_, _) =>
         {
-            foreach (var item in fileMenu.Items.OfType<MenuFlyoutItem>()) item.IsEnabled = !busy && session is not null && SelectedFile is not null;
+            foreach (var item in fileMenu.Items.OfType<MenuFlyoutItem>())
+                item.IsEnabled = !busy && session is not null && (SelectedFile is not null ||
+                    files.SelectedItems.Count > 0 && (Equals(item.Text, L10n.Get("S4673A2306165")) || Equals(item.Text, L10n.Get("S2F9DAA828907"))));
         };
         files.ContextFlyout = fileMenu;
         files.RightTapped += (_, args) =>
         {
-            files.SelectedItem = null;
             for (var node = args.OriginalSource as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
             {
                 if (node is ListViewItem item)
                 {
-                    files.SelectedItem = item.Content;
+                    if (!files.SelectedItems.Contains(item.Content)) files.SelectedItem = item.Content;
                     break;
                 }
                 if (ReferenceEquals(node, files))
@@ -351,13 +357,17 @@ internal sealed partial class SessionPane : Grid, IDisposable
             var item = new MenuFlyoutItem { Text = label };
             item.Click += async (_, _) =>
             {
-                try { if (!busy && SelectedFile is not null) await operation(); }
+                try { if (!busy && files.SelectedItems.Count > 0) await operation(); }
                 catch (Exception ex) { if (!disposed) fileStatus.Text = ex.Message; }
             };
             fileMenu.Items.Add(item);
         }
 
-        files.SelectionChanged += (_, _) => SetFileActionsEnabled(session is not null && !busy);
+        files.SelectionChanged += (_, _) =>
+        {
+            SetFileActionsEnabled(session is not null && !busy);
+            if (!busy && files.SelectedItems.Count > 0) fileStatus.Text = L10n.Format("FilesSelected", files.SelectedItems.Count);
+        };
         files.KeyDown += async (_, args) =>
         {
             if (busy || session is null) return;
@@ -889,10 +899,10 @@ internal sealed partial class SessionPane : Grid, IDisposable
         UpdateDirectoryNavigation();
         foreach (var control in fileActions.PrimaryCommands.Concat(fileActions.SecondaryCommands).OfType<Control>())
             control.IsEnabled = enabled;
-        if (downloadFileButton is not null) downloadFileButton.IsEnabled = enabled && SelectedFile is not null;
+        if (downloadFileButton is not null) downloadFileButton.IsEnabled = enabled && files.SelectedItems.Count > 0;
     }
 
-    private RemoteEntry? SelectedFile => (files.SelectedItem as RemoteFileRow)?.Entry;
+    private RemoteEntry? SelectedFile => files.SelectedItems.Count == 1 ? (files.SelectedItems[0] as RemoteFileRow)?.Entry : null;
 
     private async Task FileActionAsync(Func<Task> action)
     {
@@ -941,16 +951,21 @@ internal sealed partial class SessionPane : Grid, IDisposable
 
     private async Task DeleteAsync()
     {
-        if (SelectedFile is not { } entry)
-            return;
+        var selected = SelectedFiles;
+        if (selected.Length == 0) return;
         await FileActionAsync(async () =>
         {
-            if (await ConfirmAsync(L10n.Get("SCDE89AFAAE2F"), L10n.Format("SEEB5EEA3D498", entry.Name), L10n.Get("S2F9DAA828907"))
-                && session is { } connected)
+            if (!await ConfirmAsync(L10n.Get("SCDE89AFAAE2F"),
+                L10n.Format("DeleteFilesPrompt", selected.Length) + "\n" + string.Join("\n", selected.Take(8).Select(f => f.Name)),
+                L10n.Get("S2F9DAA828907")) || session is not { } connected) return;
+            var batch = new FileBatch();
+            foreach (var entry in selected)
             {
-                await connected.DeleteAsync(entry, cancellation);
-                await RefreshFilesAsync(directory);
+                cancellation.ThrowIfCancellationRequested();
+                await batch.Run(entry.Name, async () => { await connected.DeleteAsync(entry, cancellation); batch.Completed++; });
             }
+            await RefreshFilesAsync(directory);
+            FinishBatch(batch);
         });
     }
 
@@ -972,9 +987,9 @@ internal sealed partial class SessionPane : Grid, IDisposable
         await Dialog(title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap }, primary)
             .ShowAsync() == ContentDialogResult.Primary;
 
-    private ContentDialog Dialog(string title, UIElement content, string primary) => new()
+    private QueuedContentDialog Dialog(string title, UIElement content, string primary) => new()
     {
-        XamlRoot = XamlRoot, Title = title, Content = content, PrimaryButtonText = primary,
+        CanShow = () => !disposed, Cancellation = cancellation, XamlRoot = XamlRoot, Title = title, Content = content, PrimaryButtonText = primary,
         CloseButtonText = L10n.Get("S2CD0F3BE8738"), DefaultButton = ContentDialogButton.Primary
     };
 

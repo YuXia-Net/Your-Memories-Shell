@@ -10,7 +10,7 @@ internal sealed partial class SessionPane
 {
     private readonly SemaphoreSlim zmodemInput = new(1);
     private ZmodemTransfer? activeZmodem;
-    private ContentDialog? zmodemDialog;
+    private QueuedContentDialog? zmodemDialog;
     private byte[] pendingZmodemPrefix = [];
     private long zmodemPrefixVersion;
 

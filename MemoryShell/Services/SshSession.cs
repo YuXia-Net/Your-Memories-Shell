@@ -645,7 +645,7 @@ public sealed partial class SshSession : IDisposable
         return path.StartsWith('/') ? path : client.WorkingDirectory.TrimEnd('/') + "/" + path;
     }
 
-    public Task DownloadAsync(string path, string localPath, IProgress<long>? progress = null, CancellationToken ct = default) =>
+    public Task DownloadAsync(string path, string localPath, IProgress<long>? progress = null, CancellationToken ct = default, bool overwrite = false) =>
         WithSftpAsync(async (client, token) =>
         {
             var destination = Path.GetFullPath(localPath);
@@ -659,7 +659,7 @@ public sealed partial class SshSession : IDisposable
                     await client.DownloadFileAsync(path, output, reporter, token).ConfigureAwait(false);
                 }
                 token.ThrowIfCancellationRequested();
-                File.Move(partial, destination, overwrite: true);
+                File.Move(partial, destination, overwrite);
             }
             catch
             {
@@ -670,11 +670,22 @@ public sealed partial class SshSession : IDisposable
             }
         }, ct);
 
-    public Task UploadAsync(string localPath, string path, IProgress<long>? progress = null, CancellationToken ct = default) =>
+    public Task<RemoteEntry?> FindEntryAsync(string path, CancellationToken ct = default) =>
+        WithSftpAsync<RemoteEntry?>(async (client, token) =>
+        {
+            var file = await FindRemoteEntryAsync(client, path, token);
+            return file is null ? null : new RemoteEntry(file.Name, file.FullName, file.IsDirectory, file.IsSymbolicLink,
+                file.Length, file.LastWriteTime, GetUnixMode(file.Attributes), GetOwnerId(file.UserId), GetOwnerId(file.GroupId));
+        }, ct);
+
+    public Task UploadAsync(string localPath, string path, IProgress<long>? progress = null, CancellationToken ct = default, bool overwrite = false) =>
         WithSftpAsync(async (client, token) =>
         {
             // Stage transfers beside the destination to avoid exposing an incomplete upload at the final path.
             var partial = TemporaryRemotePath(path);
+            var original = await FindRemoteEntryAsync(client, path, token);
+            if (original is not null && (!overwrite || !original.IsRegularFile || original.IsSymbolicLink))
+                throw new IOException(L10n.Get("TransferDestinationChanged"));
             await using var input = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
             try
             {
@@ -682,7 +693,15 @@ public sealed partial class SshSession : IDisposable
                     report => progress.Report(checked((long)report.TotalBytesUploaded)));
                 await client.UploadFileAsync(input, partial, canOverride: false, reporter, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
-                await client.RenameFileAsync(partial, path, token).ConfigureAwait(false);
+                if (original is not null)
+                {
+                    var latest = await FindRemoteEntryAsync(client, path, token);
+                    if (latest is not { IsRegularFile: true, IsSymbolicLink: false } || latest.Length != original.Length || latest.LastWriteTimeUtc != original.LastWriteTimeUtc)
+                        throw new IOException(L10n.Get("TransferDestinationChanged"));
+                    try { await Task.Run(() => client.RenameFile(partial, path, isPosix: true), token).ConfigureAwait(false); }
+                    catch (NotSupportedException) { await ReplaceRemoteFileAsync(client, partial, path, token).ConfigureAwait(false); }
+                }
+                else await client.RenameFileAsync(partial, path, token).ConfigureAwait(false);
             }
             catch
             {
@@ -693,6 +712,26 @@ public sealed partial class SshSession : IDisposable
 
     private static string TemporaryRemotePath(string path) =>
         $"{path[..(path.LastIndexOf('/') + 1)]}.ymsh-{Guid.NewGuid():N}.partial";
+
+    private static async Task ReplaceRemoteFileAsync(SftpClient client, string staged, string destination, CancellationToken token)
+    {
+        var backup = destination + $".ymsh-{Guid.NewGuid():N}.backup";
+        await client.RenameFileAsync(destination, backup, token).ConfigureAwait(false);
+        try { await client.RenameFileAsync(staged, destination, token).ConfigureAwait(false); }
+        catch (Exception failure)
+        {
+            using var rollback = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try { await client.RenameFileAsync(backup, destination, rollback.Token).ConfigureAwait(false); }
+            catch (Exception restoreFailure)
+            {
+                throw new IOException(L10n.Format("TransferRollbackFailed", backup), new AggregateException(failure, restoreFailure));
+            }
+            throw;
+        }
+        using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try { await client.DeleteFileAsync(backup, cleanup.Token).ConfigureAwait(false); }
+        catch (Exception ex) { throw new IOException(L10n.Format("TransferBackupCleanup", backup), ex); }
+    }
 
     private static async Task RemovePartialAsync(SftpClient client, string path)
     {
