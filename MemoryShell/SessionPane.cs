@@ -19,7 +19,7 @@ internal sealed partial class SessionPane : Grid, IDisposable
     private readonly Action<string> metricsChanged;
     private readonly Action<bool> connectionCompleted;
     private bool disconnectRequested;
-    private bool closingConnection;
+    private Task? cancelLifetime;
     private bool attemptFinished;
     private readonly CancellationTokenSource lifetime = new();
     private readonly CancellationToken cancellation;
@@ -541,7 +541,7 @@ internal sealed partial class SessionPane : Grid, IDisposable
         disconnectRequested = true;
         UpdateConnectionButton();
         SetStatus(L10n.Get("S1CDE2F91091B"));
-        lifetime.Cancel();
+        cancelLifetime ??= lifetime.CancelAsync();
     }
 
     public async Task<SshConnectionFailure?> ConnectAsync(string? secret, byte[]? privateKey)
@@ -558,12 +558,11 @@ internal sealed partial class SessionPane : Grid, IDisposable
             {
                 if (privateKey is not null)
                     System.Security.Cryptography.CryptographicOperations.ZeroMemory(privateKey);
-                if (profile.Jump?.PrivateKey is { } jumpKey)
-                    System.Security.Cryptography.CryptographicOperations.ZeroMemory(jumpKey);
+                JumpReferences.ClearKeys(profile.Jump);
             }
             if (disposed || disconnectRequested)
             {
-                await CloseTransportAsync(connected);
+                _ = CloseTransportAsync(connected);
                 return null;
             }
 
@@ -577,14 +576,8 @@ internal sealed partial class SessionPane : Grid, IDisposable
             UpdateMonitoring();
             QueueLowerPaneUpdate();
             await Task.Run(() => connected.ReadTerminalBytesAsync(ReceiveSshBytesAsync, cancellation), cancellation);
-            if (!disposed && !disconnectRequested)
-            {
-                if (!connected.IsTransportConnected)
-                    failure = new SshConnectionFailure(L10n.Get("S4E472165EB0D"), L10n.Get("SEE5E0A2AABE1"), SshRetryAction.Reconnect);
-                SetStatus(failure?.Message ?? L10n.Get("SE68917D674D1"));
-            }
         }
-        catch (Exception) when (disposed || disconnectRequested) { }
+        catch (Exception) when (disposed || disconnectRequested || reported) { }
         catch (Exception ex)
         {
             if (!reported) connectionCompleted(false);
@@ -600,7 +593,13 @@ internal sealed partial class SessionPane : Grid, IDisposable
                 CloseZmodem();
                 var disconnected = session;
                 session = null;
-                closingConnection = true;
+                attemptFinished = true;
+                if (reported || disconnectRequested)
+                {
+                    var message = L10n.Get(disconnectRequested ? "SB13C23335121" : "SFD1C442912FC");
+                    terminal.Write("\r\n" + message + "\r\n");
+                    SetStatus(message);
+                }
                 UpdateConnectionButton();
                 UpdateMonitoring();
                 SetFileActionsEnabled(false);
@@ -608,15 +607,7 @@ internal sealed partial class SessionPane : Grid, IDisposable
                 forwardingRows.Clear();
                 SetMetrics(L10n.Get("SFD1C442912FC"));
                 if (disconnected is not null)
-                    await CloseTransportAsync(disconnected);
-                if (!disposed)
-                {
-                    attemptFinished = true;
-                    closingConnection = false;
-                    UpdateConnectionButton();
-                    if (disconnectRequested)
-                        SetStatus(L10n.Get("SB13C23335121"));
-                }
+                    _ = CloseTransportAsync(disconnected);
             }
         }
         return failure;
@@ -652,8 +643,7 @@ internal sealed partial class SessionPane : Grid, IDisposable
         else if (monitorLifetime is { } monitoring)
         {
             monitorLifetime = null;
-            monitoring.Cancel();
-            monitoring.Dispose();
+            _ = DisposeAfterCancellationAsync(monitoring, monitoring.CancelAsync());
         }
     }
 
@@ -664,7 +654,7 @@ internal sealed partial class SessionPane : Grid, IDisposable
         {
             try
             {
-                var sample = await monitor.ReadAsync(token);
+                var sample = await Task.Run(() => monitor.ReadAsync(token), token);
                 if (token.IsCancellationRequested || !ReferenceEquals(session, connected))
                     return;
                 SetMetrics("", sample);
@@ -1057,6 +1047,13 @@ internal sealed partial class SessionPane : Grid, IDisposable
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
     }
 
+    private static async Task DisposeAfterCancellationAsync(CancellationTokenSource source, Task canceled)
+    {
+        try { await canceled.ConfigureAwait(false); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+        finally { source.Dispose(); }
+    }
+
     public void Dispose()
     {
         if (disposed)
@@ -1066,13 +1063,13 @@ internal sealed partial class SessionPane : Grid, IDisposable
         directoryTimer?.Stop();
         fileFilterTimer?.Stop();
         CloseZmodem();
-        lifetime.Cancel();
+        cancelLifetime ??= lifetime.CancelAsync();
         if (session is { } connected) _ = CloseTransportAsync(connected);
         session = null;
         ActivityChanged?.Invoke();
         ActivityChanged = null;
         terminal.Dispose();
-        lifetime.Dispose();
+        _ = DisposeAfterCancellationAsync(lifetime, cancelLifetime);
     }
 }
 

@@ -9,7 +9,7 @@ namespace MemoryShell;
 internal sealed class ProxyEditor : StackPanel
 {
     private readonly CheckBox enabled = new() { Content = L10n.Get("S10743551FBD1") };
-    private readonly ComboBox kind = new() { Header = L10n.Get("SAB2F31F30ACF"), HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ExplicitComboBox kind = new() { Header = L10n.Get("SAB2F31F30ACF"), HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox host = new() { Header = L10n.Get("SE87D9F23A3F5"), PlaceholderText = "proxy.example.com" };
     private readonly TextBox port = new() { Header = L10n.Get("SE71AC32B544B") };
     private readonly TextBox user = new() { Header = L10n.Get("S63527366AABC") };
@@ -60,6 +60,7 @@ internal sealed class ProxyEditor : StackPanel
             RefreshDetails();
         };
         host.TextChanged += (_, _) => RefreshDetails();
+        host.LostFocus += (_, _) => ApplyPastedEndpoint();
         port.TextChanged += (_, _) => RefreshDetails();
         user.TextChanged += (_, _) => RefreshDetails();
         keepPassword.Checked += (_, _) => RefreshDetails();
@@ -77,6 +78,7 @@ internal sealed class ProxyEditor : StackPanel
         if (!IsRouteEnabled)
             return null;
 
+        ApplyPastedEndpoint();
         var address = NormalizeHost(host.Text);
         var number = ReadPortOrZero();
         if ((Uri.CheckHostName(address) == UriHostNameType.Unknown && !IPAddress.TryParse(address, out _)) ||
@@ -98,6 +100,36 @@ internal sealed class ProxyEditor : StackPanel
             throw new ArgumentException(L10n.Get("S40C8BD13911C"));
 
         return new SshProxySettings { Kind = SelectedKind, Host = address, Port = number, Username = username, Password = secret };
+    }
+
+    private void ApplyPastedEndpoint()
+    {
+        var input = host.Text.Trim();
+        if (IPAddress.TryParse(input.Trim('[', ']'), out _)) return;
+        var scheme = input.IndexOf("://", StringComparison.Ordinal);
+        var authority = scheme < 0 ? input : input[(scheme + 3)..].TrimEnd('/');
+        if (authority.IndexOfAny(['/', '?', '#']) >= 0 || (scheme < 0 && authority.Contains('@'))) return;
+        if (!Uri.TryCreate("tcp://" + authority, UriKind.Absolute, out var uri) || uri.Host.Length == 0) return;
+        if (scheme < 0 && uri.Port < 1) return;
+        var protocol = scheme < 0 ? SelectedKind : input[..scheme].ToLowerInvariant() switch
+        {
+            "http" => SshProxyKind.Http,
+            "socks4" => SshProxyKind.Socks4,
+            "socks5" or "socks5h" => SshProxyKind.Socks5,
+            _ => (SshProxyKind?)null
+        };
+        if (protocol is null) return;
+        var credentials = uri.UserInfo.Split(':', 2);
+        kind.SelectedIndex = (int)protocol.Value;
+        host.Text = uri.IdnHost;
+        if (uri.Port >= 0) port.Text = uri.Port.ToString();
+        else port.Text = (protocol == SshProxyKind.Http ? 80 : DefaultPort(protocol.Value)).ToString();
+        if (uri.UserInfo.Length > 0)
+        {
+            user.Text = Uri.UnescapeDataString(credentials[0]);
+            password.Password = credentials.Length == 2 ? Uri.UnescapeDataString(credentials[1]) : "";
+            keepPassword.IsChecked = false;
+        }
     }
 
     private void LoadSettings(SshProxySettings? settings)

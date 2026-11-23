@@ -24,6 +24,9 @@ public sealed partial class SshSession : IDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly CancellationToken _lifetimeToken;
     private int _reading;
+    private readonly object _resizeLock = new();
+    private (uint Columns, uint Rows) _requestedSize;
+    private bool _resizing;
     private int _disposed;
 
     private SshSession(SshClient ssh, SftpClient sftp, ShellStream shell, PrivateKeyFile? privateKey, JumpTunnel? jump,
@@ -146,8 +149,9 @@ public sealed partial class SshSession : IDisposable
         var connection = proxy is null
             ? new ConnectionInfo(host, port, username, authentication)
             : new ConnectionInfo(host, port, username, GetProxyType(proxy.Kind),
-                proxy.Host, proxy.Port, proxy.Username, proxy.Password, authentication);
+                proxy.Host, proxy.Port, proxy.Username ?? "", proxy.Password ?? "", authentication);
         connection.Timeout = TimeSpan.FromSeconds(20);
+        connection.ChannelCloseTimeout = TimeSpan.FromSeconds(1);
         return connection;
     }
 
@@ -255,6 +259,7 @@ public sealed partial class SshSession : IDisposable
         _shell.DataReceived += onData;
         _shell.Closed += onClosed;
         _shell.ErrorOccurred += onError;
+        _ssh.ErrorOccurred += onError;
         try
         {
             var bytes = new byte[8192];
@@ -268,7 +273,7 @@ public sealed partial class SshSession : IDisposable
                     if (count > 0)
                         await output(bytes.AsMemory(0, count), cancellation.Token).ConfigureAwait(false);
                 }
-                if (!_shell.CanWrite)
+                if (!_shell.CanWrite || !_ssh.IsConnected)
                     break;
             }
             while (await signal.Reader.WaitToReadAsync(cancellation.Token).ConfigureAwait(false) && signal.Reader.TryRead(out _));
@@ -281,6 +286,7 @@ public sealed partial class SshSession : IDisposable
             _shell.DataReceived -= onData;
             _shell.Closed -= onClosed;
             _shell.ErrorOccurred -= onError;
+            _ssh.ErrorOccurred -= onError;
             Volatile.Write(ref _reading, 0);
         }
     }
@@ -305,8 +311,30 @@ public sealed partial class SshSession : IDisposable
 
     public void Resize(int columns, int rows)
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        _shell.ChangeWindowSize((uint)Math.Clamp(columns, 1, 1024), (uint)Math.Clamp(rows, 1, 1024), 0, 0);
+        lock (_resizeLock)
+        {
+            _requestedSize = ((uint)Math.Clamp(columns, 1, 1024), (uint)Math.Clamp(rows, 1, 1024));
+            if (_resizing || Volatile.Read(ref _disposed) != 0) return;
+            _resizing = true;
+        }
+        _ = Task.Run(ApplyWindowSize);
+    }
+
+    private void ApplyWindowSize()
+    {
+        while (true)
+        {
+            (uint Columns, uint Rows) size;
+            lock (_resizeLock) size = _requestedSize;
+            try { _shell.ChangeWindowSize(size.Columns, size.Rows, 0, 0); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+            lock (_resizeLock)
+            {
+                if (size != _requestedSize && Volatile.Read(ref _disposed) == 0) continue;
+                _resizing = false;
+                return;
+            }
+        }
     }
 
     public async Task<string> ExecuteAsync(string command, CancellationToken ct = default)
@@ -796,7 +824,7 @@ public sealed partial class SshSession : IDisposable
         _lifetime.Dispose();
     }
 
-    private sealed class JumpTunnel(SshClient client, ForwardedPortLocal port, PrivateKeyFile? privateKey) : IDisposable
+    private sealed class JumpTunnel(SshClient client, ForwardedPortLocal port, PrivateKeyFile? privateKey, JumpTunnel? parent) : IDisposable
     {
         public int BoundPort => (int)port.BoundPort;
 
@@ -807,24 +835,29 @@ public sealed partial class SshSession : IDisposable
             PrivateKeyFile? key = null;
             SshClient? jump = null;
             ForwardedPortLocal? forward = null;
+            JumpTunnel? upstream = null;
             try
             {
-                key = OpenPrivateKey(settings.PrivateKey, settings.Password, SshFailureStage.JumpPrivateKey);
-                jump = new SshClient(CreateConnectionInfo(settings.Host, settings.Port, settings.Username,
-                    settings.Password, key, proxy)) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
+                key = OpenPrivateKey(settings.PrivateKey, settings.Password, SshFailureStage.JumpPrivateKey, settings.KeyPath);
+                if (settings.Jump is { } previous)
+                    upstream = await OpenAsync(previous, proxy ?? settings.Proxy, settings.Host, settings.Port, trustHost, token).ConfigureAwait(false);
+                jump = new SshClient(CreateConnectionInfo(upstream is null ? settings.Host : "127.0.0.1",
+                    upstream?.BoundPort ?? settings.Port, settings.Username,
+                    settings.Password, key, upstream is null ? proxy ?? settings.Proxy : null)) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
                 await ConnectPinnedAsync(jump, settings.Host, settings.Port, trustHost, token).ConfigureAwait(false);
 
                 forward = new ForwardedPortLocal("127.0.0.1", 0, targetHost, (uint)targetPort);
                 jump.AddForwardedPort(forward);
                 forward.Start();
                 token.ThrowIfCancellationRequested();
-                return new JumpTunnel(jump, forward, key);
+                return new JumpTunnel(jump, forward, key, upstream);
             }
             catch
             {
                 jump?.Dispose();
                 forward?.Dispose();
                 key?.Dispose();
+                upstream?.Dispose();
                 throw;
             }
         }
@@ -835,7 +868,7 @@ public sealed partial class SshSession : IDisposable
             finally
             {
                 try { port.Dispose(); }
-                finally { privateKey?.Dispose(); }
+                finally { try { privateKey?.Dispose(); } finally { parent?.Dispose(); } }
             }
         }
     }

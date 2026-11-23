@@ -56,7 +56,11 @@ public sealed partial class TerminalView : Grid, IDisposable
     public int Columns => terminal.Columns;
     public int Rows => terminal.Rows;
     public string? WorkingDirectory { get; private set; }
-    internal void KeepHistoryFrom(TerminalView previous) => terminal.KeepHistoryFrom(previous.terminal);
+    internal void KeepHistoryFrom(TerminalView previous)
+    {
+        terminal.KeepHistoryFrom(previous.terminal);
+        ScrollTo(terminal.HistoryCount);
+    }
 
     public TerminalView()
     {

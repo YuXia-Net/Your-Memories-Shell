@@ -21,6 +21,12 @@ public sealed record ConnectionProfile
 
 public sealed record SshJumpSettings
 {
+    public Guid? ConnectionId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public SshProxySettings? Proxy { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public SshJumpSettings? Jump { get; init; }
+    public string? KeyPath { get; init; }
     public string Host { get; init; } = string.Empty;
     public int Port { get; init; } = 22;
     public string Username { get; init; } = string.Empty;

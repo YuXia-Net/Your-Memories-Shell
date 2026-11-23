@@ -102,7 +102,7 @@ public sealed partial class MainWindow
             var panelLayout = previous?.CapturePanelLayout(workspaceLayout) ?? workspaceLayout;
             
             var configuration = state.Profile;
-            var profile = ConnectionTab.CloneJumpKey(configuration);
+            var profile = JumpReferences.Resolve(configuration, store.Connections);
             var pane = new SessionPane(hwnd, profile, store, SaveWorkspace, TrustHostAsync, text =>
             {
                 if (ReferenceEquals(Sessions.SelectedItem, tab))

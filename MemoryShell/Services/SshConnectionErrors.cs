@@ -114,6 +114,9 @@ internal static class SshConnectionErrors
 
         if (errors.OfType<SocketException>().FirstOrDefault() is { } socket)
         {
+            if (socket.SocketErrorCode == SocketError.ConnectionRefused && profile.Proxy is { } proxy &&
+                stage is SshFailureStage.ProxyRoute or SshFailureStage.JumpConnection)
+                return new(L10n.Get("S3E13B80BEB4B"), L10n.Format("ProxyListenerRefused", proxy.Host, proxy.Port), SshRetryAction.EditConnection);
             return socket.SocketErrorCode switch
             {
                 SocketError.HostNotFound or SocketError.NoData => new(L10n.Get("S9AB4962C4A65"), L10n.Format("S5BFBE4938CD0", route), SshRetryAction.EditConnection),

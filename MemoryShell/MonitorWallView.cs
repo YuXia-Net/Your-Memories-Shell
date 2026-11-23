@@ -226,13 +226,13 @@ internal sealed class MonitorWallView : Grid, IDisposable
             if ((!saved.Profile.RememberCredentials && string.IsNullOrEmpty(saved.Profile.KeyPath)) || (saved.Secret is null && saved.PrivateKey is null && string.IsNullOrEmpty(saved.Profile.KeyPath)))
                 throw new InvalidOperationException(L10n.Get("MonitorNeedsCredentials"));
             if (!trusted.Any(key => key.Host.Equals(saved.Profile.Host, StringComparison.OrdinalIgnoreCase) && key.Port == saved.Profile.Port) ||
-                (saved.Profile.Jump is { } route && !trusted.Any(key => key.Host.Equals(route.Host, StringComparison.OrdinalIgnoreCase) && key.Port == route.Port)))
+                (saved.Profile.Jump is { ConnectionId: null } route && !trusted.Any(key => key.Host.Equals(route.Host, StringComparison.OrdinalIgnoreCase) && key.Port == route.Port)))
                 throw new InvalidOperationException(L10n.Get("MonitorNeedsTrust"));
             if (worker.Connection is null)
             {
                 screen.SetStatus(L10n.Get("MonitorConnecting"), false);
-                var copy = saved with { PrivateKey = saved.PrivateKey?.ToArray(), Profile = saved.Profile with
-                { Jump = saved.Profile.Jump is { } jump ? jump with { PrivateKey = jump.PrivateKey?.ToArray() } : null } };
+                var resolved = JumpReferences.Resolve(saved.Profile, connections());
+                var copy = saved with { PrivateKey = saved.PrivateKey?.ToArray(), Profile = resolved };
                 try
                 {
                     worker.Connection = await SshSession.MonitorConnection.OpenAsync(copy, (identity, _) =>
@@ -246,7 +246,7 @@ internal sealed class MonitorWallView : Grid, IDisposable
                 finally
                 {
                     if (copy.PrivateKey is { } key) CryptographicOperations.ZeroMemory(key);
-                    if (copy.Profile.Jump?.PrivateKey is { } jumpKey) CryptographicOperations.ZeroMemory(jumpKey);
+                    JumpReferences.ClearKeys(copy.Profile.Jump);
                 }
                 worker.Monitor = new LinuxMonitor(worker.Connection.ExecuteAsync, includeProcesses: false);
             }

@@ -9,6 +9,7 @@ namespace MemoryShell;
 internal sealed class JumpEditor : StackPanel
 {
     private SshJumpSettings? original;
+    private Guid? selectedConnection;
     private readonly KeyWalletPicker wallet;
     private readonly CheckBox enabled = new() { Content = L10n.Get("S151398B54CD6") };
     private readonly TextBox host = new() { Header = L10n.Get("S5E20B52F38F4") };
@@ -21,7 +22,8 @@ internal sealed class JumpEditor : StackPanel
 
     public bool IsRouteEnabled => enabled.IsChecked == true;
 
-    public JumpEditor(SshJumpSettings? original, nint hwnd, List<SavedJumpPreset> presets, Action saveWorkspace, IEnumerable<SavedPrivateKey>? keys = null)
+    public JumpEditor(SshJumpSettings? original, nint hwnd, List<SavedJumpPreset> presets, Action saveWorkspace, IEnumerable<SavedPrivateKey>? keys = null,
+        IEnumerable<SavedConnection>? machines = null, Func<ConnectionProfile, string>? displayName = null)
     {
         wallet = new KeyWalletPicker(keys ?? []);
         this.original = original;
@@ -30,6 +32,7 @@ internal sealed class JumpEditor : StackPanel
         port.Text = (original?.Port ?? 22).ToString();
         user.Text = original?.Username ?? "";
         useKey.IsChecked = original?.UsesPrivateKey == true || original?.PrivateKey is not null;
+        path.Text = original?.KeyPath ?? "";
         path.PlaceholderText = original?.PrivateKey is null ? L10n.Get("SED5B2AB22F6C") : L10n.Get("SEF7D5375BC4B");
         var select = new Button { Content = L10n.Get("S863ED953C34B") };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
@@ -56,28 +59,62 @@ internal sealed class JumpEditor : StackPanel
         endpoint.Children.Add(host);
         endpoint.Children.Add(port);
         var fields = new StackPanel { Spacing = 8, Children = { endpoint, user, useKey, wallet, path, select, password, clearSecret, error } };
-        Children.Add(fields);
+        var choices = new StackPanel { Spacing = 8 };
+        Children.Add(choices);
+        choices.Children.Add(fields);
         var match = original is null ? null : presets.FirstOrDefault(x =>
             x.Settings.Host == original.Host && x.Settings.Port == original.Port && x.Settings.Username == original.Username &&
-            x.Settings.Password == original.Password && x.Settings.UsesPrivateKey == original.UsesPrivateKey &&
+            x.Settings.Password == original.Password && x.Settings.UsesPrivateKey == original.UsesPrivateKey && x.Settings.KeyPath == original.KeyPath &&
             (x.Settings.PrivateKey ?? []).SequenceEqual(original.PrivateKey ?? []));
         var presetSelector = new PresetSelector<SavedJumpPreset>(presets, x => x.Id, x => x.Name,
             (id, name) => new(id, name, Read(true) ?? throw new ArgumentException(L10n.Get("S06FCB9826093"))),
-            chosen =>
-            {
-                wallet.SelectedIndex = 0;
-                this.original = chosen.Settings;
-                host.Text = chosen.Settings.Host; port.Text = chosen.Settings.Port.ToString(); user.Text = chosen.Settings.Username;
-                useKey.IsChecked = chosen.Settings.UsesPrivateKey || chosen.Settings.PrivateKey is not null;
-                path.Text = ""; password.Password = "";
-                path.PlaceholderText = chosen.Settings.PrivateKey is null ? L10n.Get("SED5B2AB22F6C") : L10n.Get("SEF7D5375BC4B");
-                Update();
-            }, saveWorkspace, match?.Id);
+            chosen => Fill(chosen.Settings), saveWorkspace, match?.Id);
         fields.Children.Insert(0, presetSelector);
+        if (machines is not null)
+        {
+            var picker = new ExplicitComboBox { Header = L10n.Get("JumpFromVault"), HorizontalAlignment = HorizontalAlignment.Stretch };
+            picker.Items.Add(new ComboBoxItem { Content = L10n.Get("S6E382D9250F8") });
+            foreach (var machine in machines.OrderBy(m => m.Profile.Name, StringComparer.CurrentCultureIgnoreCase))
+                picker.Items.Add(new ComboBoxItem { Content = displayName?.Invoke(machine.Profile) ?? machine.Profile.Name, Tag = machine });
+            selectedConnection = original?.ConnectionId;
+            var selected = picker.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Tag is SavedConnection c && c.Profile.Id == selectedConnection);
+            if (selectedConnection is not null && selected is null)
+            {
+                selected = new ComboBoxItem { Content = L10n.Get("JumpReferenceMissing"), Tag = selectedConnection.Value };
+                picker.Items.Add(selected);
+            }
+            picker.SelectedItem = selected ?? picker.Items[0];
+            picker.SelectionChanged += (_, _) =>
+            {
+                selectedConnection = (picker.SelectedItem as ComboBoxItem)?.Tag switch
+                {
+                    SavedConnection saved => saved.Profile.Id,
+                    Guid id => id,
+                    _ => null
+                };
+                Update();
+            };
+            choices.Children.Insert(0, picker);
+        }
         fields.Children.Add(presetSelector.Editor);
+        void Fill(SshJumpSettings source)
+        {
+            this.original = source;
+            wallet.SelectedIndex = -1;
+            clearSecret.IsChecked = false;
+            host.Text = source.Host;
+            port.Text = source.Port.ToString();
+            user.Text = source.Username;
+            useKey.IsChecked = source.UsesPrivateKey || source.PrivateKey is not null;
+            path.Text = source.KeyPath ?? "";
+            password.Password = "";
+            path.PlaceholderText = L10n.Get(source.PrivateKey is null ? "SED5B2AB22F6C" : "SEF7D5375BC4B");
+            Update();
+        }
         void Update()
         {
-            fields.Visibility = enabled.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            choices.Visibility = enabled.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            fields.Visibility = selectedConnection is null ? Visibility.Visible : Visibility.Collapsed;
             wallet.Visibility = useKey.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             select.Visibility = path.Visibility = useKey.IsChecked == true && wallet.SelectedKey is null ? Visibility.Visible : Visibility.Collapsed;
             password.Header = useKey.IsChecked == true ? L10n.Get("S069B9FBB176C") : L10n.Get("SC7A9BF9BEEA1");
@@ -102,6 +139,8 @@ internal sealed class JumpEditor : StackPanel
     {
         if (enabled.IsChecked != true)
             return null;
+        if (selectedConnection is { } id)
+            return new SshJumpSettings { ConnectionId = id };
 
         var address = NormalizeHost(host.Text);
         var number = ReadPort();
@@ -121,7 +160,7 @@ internal sealed class JumpEditor : StackPanel
                 if (key is null && requireKey)
                     throw new ArgumentException(L10n.Get("S37B7C6E66C5D"));
             }
-            else
+            else if (!string.Equals(privateKeyPath, original?.KeyPath, StringComparison.OrdinalIgnoreCase))
                 key = WorkspaceStore.ImportPrivateKey(privateKeyPath);
         }
 
@@ -134,6 +173,7 @@ internal sealed class JumpEditor : StackPanel
         return new SshJumpSettings
         {
             Host = address, Port = number, Username = username, PrivateKey = key, UsesPrivateKey = useKey.IsChecked == true,
+            KeyPath = useKey.IsChecked == true && key is null && privateKeyPath.Length > 0 ? privateKeyPath : null,
             Password = passphrase
         };
     }
@@ -152,7 +192,9 @@ internal sealed class JumpEditor : StackPanel
             usingKey != (original.UsesPrivateKey || original.PrivateKey is not null))
             return null;
 
-        return usingKey && (keyPath.Length != 0 || original.PrivateKey is null) ? null : original.Password;
+        if (!usingKey || keyPath.Length == 0 && original.PrivateKey is not null ||
+            keyPath.Length > 0 && string.Equals(original.KeyPath, keyPath, StringComparison.OrdinalIgnoreCase)) return original.Password;
+        return null;
     }
 
     private static string NormalizeHost(string value)

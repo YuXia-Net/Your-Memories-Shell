@@ -1,5 +1,6 @@
 ﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using MemoryShell.Services;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 
@@ -11,7 +12,7 @@ public sealed partial class MainWindow
     private MemoryTerminalView? memoryTerminal;
 
     private QueuedContentDialog ConnectionDialog(string title, bool save, TextBlock error,
-        StackPanel device, StackPanel auth, ProxyEditor proxy, JumpEditor jump, StackPanel? probe = null)
+        StackPanel device, StackPanel auth, ProxyEditor proxy, JumpEditor jump, Func<(string Host, int Port)> target, StackPanel? probe = null)
     {
         var width = Math.Clamp(Root.ActualWidth - 48, 380, 940);
         var pages = new SettingsPages(Math.Clamp(Root.ActualHeight - 210, 260, 650));
@@ -19,11 +20,14 @@ public sealed partial class MainWindow
         general.Children.Add(SettingsPages.Section(L10n.Get("S82479CB6CA73"), device));
         general.Children.Add(SettingsPages.Section(L10n.Get("S6C422A32FA7A"), auth));
         pages.Add(L10n.Get("S7F4405D07770"), general);
-        pages.Add(L10n.Get("S8DFE5E76E0EC"), new StackPanel
+        var check = new Button { Content = L10n.Get("CheckSshRoute") };
+        var result = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var routeFields = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, Content = new StackPanel
         {
             Spacing = 24,
             Children = { SettingsPages.Section(L10n.Get("S556000791F95"), proxy), SettingsPages.Section(L10n.Get("S542579D62B1C"), jump) }
-        });
+        } };
+        pages.Add(L10n.Get("S8DFE5E76E0EC"), new StackPanel { Spacing = 12, Children = { routeFields, check, result } });
         if (probe is not null) pages.Add(L10n.Get("MonitorWallTitle"), SettingsPages.Section(L10n.Get("MonitorWallTitle"), probe));
         var layout = new Grid { Width = width - 48, RowSpacing = 10 };
         layout.RowDefinitions.Add(new RowDefinition());
@@ -43,6 +47,49 @@ public sealed partial class MainWindow
         var dialog = Dialog(title, layout, save ? L10n.Get("SA3030BF8F16D") : L10n.Get("SA5574109F020"));
         dialog.Resources["ContentDialogMaxWidth"] = width;
         dialog.Resources["ContentDialogMinWidth"] = Math.Min(340, width);
+        CancellationTokenSource? checking = null;
+        dialog.Closing += (_, _) => checking?.Cancel();
+        check.Click += async (_, _) =>
+        {
+            if (checking is not null) return;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            checking = timeout;
+            check.IsEnabled = routeFields.IsEnabled = false;
+            ConnectionProfile? route = null;
+            bool rejected = false;
+            try
+            {
+                var (host, port) = target();
+                if (string.IsNullOrWhiteSpace(host) || port is < 1 or > 65535)
+                    throw new ArgumentException(L10n.Get("RouteTargetRequired"));
+                route = new ConnectionProfile { Host = host, Port = port, Proxy = proxy.Read(), Jump = jump.Read(true) };
+                var unresolved = route;
+                try { route = JumpReferences.Resolve(unresolved, store.Connections); }
+                finally { JumpReferences.ClearKeys(unresolved.Jump); }
+                var pins = store.HostKeys.ToArray();
+                result.Text = L10n.Get("CheckingSshRoute");
+                await SshSession.CheckRouteAsync(route, (identity, _) =>
+                {
+                    var trusted = pins.Any(p => p.Port == identity.Port && p.Algorithm == identity.Algorithm &&
+                        p.Fingerprint == identity.Fingerprint && string.Equals(p.Host, identity.Host, StringComparison.OrdinalIgnoreCase));
+                    rejected = !trusted;
+                    return Task.FromResult(trusted);
+                }, timeout.Token);
+                result.Text = L10n.Get("SshRouteReady");
+            }
+            catch (OperationCanceledException) { result.Text = L10n.Get("RouteCheckStopped"); }
+            catch (Exception ex)
+            {
+                result.Text = rejected ? L10n.Get("CheckJumpTrust") : route is null ? ex.Message :
+                    MaskDeviceAddress(route, SshConnectionErrors.Classify(ex, route, false).Message, store.HideDeviceAddress);
+            }
+            finally
+            {
+                JumpReferences.ClearKeys(route?.Jump);
+                checking = null;
+                check.IsEnabled = routeFields.IsEnabled = true;
+            }
+        };
         return dialog;
     }
 

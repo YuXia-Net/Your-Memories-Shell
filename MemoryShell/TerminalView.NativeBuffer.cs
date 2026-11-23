@@ -149,7 +149,23 @@ internal sealed class TerminalBuffer
     public Line GetLine(int index) => index < HistoryCount ? history[historyStart + index]! : active.Lines[index - HistoryCount];
     internal void KeepHistoryFrom(TerminalBuffer previous)
     {
-        for (var row = previous.historyStart; row < previous.history.Count; row++) Copy(previous.history[row]!);
+        // Archived lines are immutable. Preserve their style IDs and reuse their packed cells.
+        if (history.Count == 0 && styles.Count == 1)
+        {
+            foreach (var style in previous.styles.Skip(1))
+            {
+                styleIds.Add(style, styles.Count);
+                styles.Add(style);
+            }
+            for (var row = previous.historyStart; row < previous.history.Count; row++)
+            {
+                var line = previous.history[row]!;
+                history.Add(line);
+                historyCells += line.CellCount;
+            }
+            TrimHistory();
+        }
+        else for (var row = previous.historyStart; row < previous.history.Count; row++) Copy(previous.history[row]!);
         CopyScreen(previous.primary);
         if (previous.Alternate) CopyScreen(previous.active);
 

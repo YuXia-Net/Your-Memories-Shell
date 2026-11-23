@@ -228,7 +228,8 @@ public sealed partial class MainWindow : Window
         auth.Children.Add(remember);
         auth.Children.Add(keyName);
         var proxyEditor = new ProxyEditor(original?.Proxy, store.ProxyPresets, SaveWorkspace, store.HideDeviceAddress);
-        var jumpEditor = new JumpEditor(original?.Jump, hwnd, store.JumpPresets, SaveWorkspace, store.KeyWallet);
+        var jumpEditor = new JumpEditor(original?.Jump, hwnd, store.JumpPresets, SaveWorkspace, store.KeyWallet,
+            store.Connections.Where(c => c.Profile.Id != original?.Id), DeviceName);
 
         string KeyPath() => key.Text.Trim().Trim('"');
         string HostName()
@@ -278,7 +279,7 @@ public sealed partial class MainWindow : Window
             save ? (entry is null ? L10n.Get("S94AA4F221201") : L10n.Get("SA7F143E0A81D")) :
             original is null ? L10n.Get("SBEC3D896410B") : L10n.Format("S43DEE2EE9C40", DeviceName(original));
         var dialog = ConnectionDialog(title,
-            save, error, device, auth, proxyEditor, jumpEditor, save ? new StackPanel { Spacing = 10, Children =
+            save, error, device, auth, proxyEditor, jumpEditor, () => (HostName(), TryReadPort(out var n) ? n : 0), save ? new StackPanel { Spacing = 10, Children =
             {
                 includeInMonitor,
                 new TextBlock { Text = L10n.Get("MonitorIncludeNote"), TextWrapping = TextWrapping.Wrap, FontSize = 12 },

@@ -6,11 +6,12 @@ namespace MemoryShell;
 internal sealed class PresetSelector<T> : StackPanel where T : class
 {
     public StackPanel Editor { get; } = new() { Spacing = 8 };
+    private readonly ExplicitComboBox picker = new() { Header = L10n.Get("PresetChoose"), HorizontalAlignment = HorizontalAlignment.Stretch };
+    public void ClearSelection() => picker.SelectedIndex = 0;
     public PresetSelector(List<T> items, Func<T, Guid> id, Func<T, string> name,
         Func<Guid, string, T> read, Action<T> apply, Action persist, Guid? selected = null, Func<T, string>? displayName = null)
     {
         Spacing = 8;
-        var picker = new ExplicitComboBox { Header = L10n.Get("PresetChoose"), HorizontalAlignment = HorizontalAlignment.Stretch };
         var label = new TextBox { Header = L10n.Get("S5FE110AA6D1D") };
         var save = new Button();
         var fresh = new Button { Content = L10n.Get("PresetNew") };

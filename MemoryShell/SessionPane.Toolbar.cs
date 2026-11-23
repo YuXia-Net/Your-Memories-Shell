@@ -223,10 +223,10 @@ internal sealed partial class SessionPane
     private void UpdateConnectionButton()
     {
         var connected = session is not null && !disconnectRequested;
-        connectionButton.IsEnabled = attemptFinished || (!disconnectRequested && !closingConnection);
+        connectionButton.IsEnabled = attemptFinished || !disconnectRequested;
         connectionGlyph.Foreground = connected ? ToolbarBrush(45, 178, 99) : ToolbarBrush(235, 70, 82);
         SetToolbarLabel(connectionButton, attemptFinished ? L10n.Get("S3E0CA6923EE4") :
-            disconnectRequested || closingConnection ? L10n.Get("S1CDE2F91091B") : connected ? L10n.Get("SA33F3804768E") : L10n.Get("S3687F953CFE8"));
+            disconnectRequested ? L10n.Get("S1CDE2F91091B") : connected ? L10n.Get("SA33F3804768E") : L10n.Get("S3687F953CFE8"));
         ActivityChanged?.Invoke();
     }
 
